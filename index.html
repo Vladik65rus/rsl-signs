@@ -231,7 +231,7 @@ const TG = window.RSL_TG && window.RSL_TG.t ? { t: dec(window.RSL_TG.t), c: dec(
 function stampOf(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}`; }
 async function sendRecord(r) {
   if (!TG) return false;
-  const { id, sent, ...item } = r;
+  const { id, sent, boarded, ...item } = r;
   const text = JSON.stringify({ format: 'rsl-online-1', points: 'RH21,LH21,POSE7(0,11,12,13,14,15,16); int16 px; NaN=-32768', items: [item] });
   const fd = new FormData();
   fd.append('chat_id', TG.c);
@@ -243,8 +243,8 @@ async function sendRecord(r) {
     if (!j.ok) { console.warn(j); return false; }
   } catch (e) { console.warn(e); return false; }
   r.sent = true;
+  try { await updateBoard(r); r.boarded = true; } catch (e) { console.warn('сводка', e); }
   try { await tx('readwrite', st => st.put(r)); } catch (e) {}
-  try { await updateBoard(r); } catch (e) { console.warn('сводка', e); }
   return true;
 }
 
@@ -296,11 +296,16 @@ async function mutateBoard(fn) {
   await tgCall('pinChatMessage', { chat_id: TG.c, message_id: m.message_id, disable_notification: true });
 }
 const clean = (x) => String(x || '').replace(/[\n—•,×]/g, ' ').replace(/\s+/g, ' ').trim();
-async function updateBoard(r) {
-  await mutateBoard(st => {
-    const name = clean(r.person) || 'без имени', word = clean(r.word).toLowerCase();
-    const ws = st.people.get(name) || new Map(); ws.set(word, (ws.get(word) || 0) + 1); st.people.set(name, ws);
-  });
+function addToBoard(st, r) {
+  const name = clean(r.person) || 'без имени', word = clean(r.word).toLowerCase();
+  const ws = st.people.get(name) || new Map(); ws.set(word, (ws.get(word) || 0) + 1); st.people.set(name, ws);
+}
+async function updateBoard(r) { await mutateBoard(st => addToBoard(st, r)); }
+async function boardOld() {                               // записи, отправленные до появления списка, — тоже в список (один раз)
+  const old = records.filter(r => r.sent && !r.boarded);
+  if (!TG || !old.length) return;
+  await mutateBoard(st => old.forEach(r => addToBoard(st, r)));
+  for (const r of old) { r.boarded = true; try { await tx('readwrite', st => st.put(r)); } catch (e) {} }
 }
 function deviceName() { const u = navigator.userAgent; return /iPhone|iPad/.test(u) ? 'iPhone' : /Android/.test(u) ? 'Android' : /Windows/.test(u) ? 'Windows' : /Mac/.test(u) ? 'Mac' : 'браузер'; }
 async function noteVisit() {                              // кто зашёл: имя (если вводил раньше) и время — видит только автор
@@ -619,7 +624,7 @@ function renderList() {
   setStatus($('list-status'), records.length ? `Записей: ${records.length}, слов: ${new Set(records.map(r => r.word.toLowerCase())).size}.` : 'Пока нет записей.');
 }
 function makeFile() {
-  const items = records.map(({ id, sent, ...x }) => x);
+  const items = records.map(({ id, sent, boarded, ...x }) => x);
 
   const d = new Date(), stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
   const name = `zhesty_rzhya_${stamp}.json`;     // латиницей: русские имена файлов ломаются в части браузеров
@@ -676,7 +681,7 @@ $('check-in').addEventListener('change', async () => {
   } catch (err) { console.error(err); setStatus($('check-status'), 'Не получилось обработать видео: ' + (err?.message || err), 'bad'); }
 });
 
-loadRecords().then(() => { if (TG && navigator.onLine !== false) sendUnsent(null); });
+loadRecords().then(async () => { if (TG && navigator.onLine !== false) { await boardOld().catch(e => console.warn(e)); await sendUnsent(null); } });
 window.addEventListener('online', () => { if (TG) sendUnsent(null); });
 $('admin-btn').addEventListener('click', adminStart);
 $('admin-ok').addEventListener('click', adminCheck);

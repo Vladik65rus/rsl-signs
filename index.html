@@ -98,7 +98,7 @@ canvas.mirror { transform: scaleX(-1); }
 <div class="wrap">
   <header>
     <h1>Словарь жестов РЖЯ</h1>
-    <p class="lead">Сбор жестов для переводчика с русского жестового языка. Снимите короткое видео одного жеста — страница найдёт руки и тело и сохранит только точки (не видео и не лицо). Всё обрабатывается прямо в вашем телефоне или компьютере. Потом нажмите «Отправить файл» и пришлите его автору проекта.</p>
+    <p class="lead">Сбор жестов для переводчика с русского жестового языка. Снимите короткое видео одного жеста — страница найдёт руки и тело и сохранит только точки (не видео и не лицо). Всё обрабатывается прямо в вашем телефоне или компьютере. Нажмите «Сохранить и отправить» — запись сразу придёт автору проекта.</p>
     <div class="stats">
       <span class="chip">Записей: <b id="st-recs">0</b></span>
       <span class="chip">Слов: <b id="st-words">0</b></span>
@@ -116,7 +116,7 @@ canvas.mirror { transform: scaleX(-1); }
     <div class="card">
       <div class="row">
         <div class="field"><label for="word">Слово (перевод жеста)</label><input type="text" id="word" placeholder="например: спасибо" autocomplete="off"></div>
-        <div class="field"><label for="person">Кто показывает (имя или код)</label><input type="text" id="person" placeholder="например: Арина" autocomplete="off"></div>
+        <div class="field"><label for="person">Ваше имя (видит только автор проекта)</label><input type="text" id="person" placeholder="например: Никита" autocomplete="off"></div>
       </div>
       <label class="consent" for="consent"><input type="checkbox" id="consent"><span>Человек на видео согласен, что точки его рук и тела (без видео и лица) будут переданы автору проекта для обучения переводчика.</span></label>
       <div class="row">
@@ -131,7 +131,7 @@ canvas.mirror { transform: scaleX(-1); }
       <div class="status" id="rec-status">Нажмите «Включить камеру» и разрешите доступ. В первый раз загрузится нейросеть (около 23 МБ).</div>
       <canvas id="rec-canvas" width="480" height="360" aria-label="Скелет рук и тела из видео"></canvas>
       <div class="legend"><span><i class="dot" style="background:var(--hand-r)"></i>правая рука</span><span><i class="dot" style="background:var(--hand-l)"></i>левая рука</span><span><i class="dot" style="background:#cfd8d3"></i>тело</span></div>
-      <div class="row"><button class="btn" id="save-btn" disabled>Сохранить запись</button><button class="btn ghost" id="again-btn" disabled>Другое видео</button></div>
+      <div class="row"><button class="btn" id="save-btn" disabled>Сохранить и отправить</button><button class="btn ghost" id="again-btn" disabled>Другое видео</button></div>
       <p class="note">Совет: показывайте одно слово 3–5 раз (каждый раз отдельное видео). Свет спереди, руки и плечи целиком в кадре.</p>
     </div>
   </section>
@@ -139,14 +139,14 @@ canvas.mirror { transform: scaleX(-1); }
   <section id="view-list" hidden>
     <div class="card">
       <ol class="steps">
-        <li>Запишите слова на вкладке «Записать жест».</li>
-        <li>Нажмите <b>«Отправить файл»</b> (на телефоне сразу откроется Telegram, ВК, почта) или <b>«Сохранить файл»</b>.</li>
-        <li>Пришлите файл <b>zhesty_rzhya_….json</b> автору проекта. Программа на его компьютере добавит жесты сама.</li>
+        <li>Записи отправляются автору проекта сами — сразу после «Сохранить и отправить» (колонка «Автору»: ✓).</li>
+        <li>Не было интернета? Нажмите <b>«Отправить неотправленные»</b>.</li>
+        <li>Запасной путь: <b>«Отправить файл»</b> (Telegram, ВК, почта) или <b>«Сохранить файл»</b> — и пришлите файл автору.</li>
       </ol>
-      <div class="list-actions"><button class="btn" id="share-btn" disabled>Отправить файл</button><button class="btn ghost" id="dl-btn" disabled>Сохранить файл</button><button class="btn ghost" id="clear-btn" disabled>Очистить после отправки</button></div>
+      <div class="list-actions"><button class="btn" id="resend-btn" disabled>Отправить неотправленные</button><button class="btn ghost" id="share-btn" disabled>Отправить файл</button><button class="btn ghost" id="dl-btn" disabled>Сохранить файл</button><button class="btn ghost" id="clear-btn" disabled>Очистить после отправки</button></div>
       <div class="status" id="list-status"></div>
-      <div style="overflow-x:auto"><table id="list-table"><thead><tr><th>Слово</th><th>Кто</th><th class="num">Кадров</th><th>Когда</th><th></th></tr></thead><tbody></tbody></table></div>
-      <p class="note">Записи хранятся только в этом браузере, пока вы их не отправите. Ничего не уходит в интернет само.</p>
+      <div style="overflow-x:auto"><table id="list-table"><thead><tr><th>Слово</th><th>Кто</th><th class="num">Кадров</th><th>Когда</th><th>Автору</th><th></th></tr></thead><tbody></tbody></table></div>
+      <p class="note">Здесь — только ваши записи с этого телефона/компьютера. Автору уходят только точки рук и тела, слово и ваше имя — без видео и лица. Видит их только автор проекта.</p>
     </div>
   </section>
 
@@ -162,6 +162,7 @@ canvas.mirror { transform: scaleX(-1); }
   </section>
 </div>
 
+<script src="config.js" onerror="window.RSL_TG = null"></script>
 <script type="module">
 const $ = (id) => document.getElementById(id);
 const tabs = [...document.querySelectorAll('nav button')];
@@ -202,6 +203,37 @@ function renderStats() {
   $('st-recs').textContent = records.length;
   $('st-words').textContent = new Set(records.map(r => r.word.toLowerCase())).size;
   for (const id of ['share-btn', 'dl-btn', 'clear-btn']) $(id).disabled = !records.length;
+  $('resend-btn').disabled = !(TG && records.some(r => !r.sent));
+}
+
+// ---------- отправка автору проекта: каждая запись сразу приходит ему в Telegram (его бот)
+const dec = (x) => { try { return atob(String(x).split('').reverse().join('')); } catch (e) { return ''; } };
+const TG = window.RSL_TG && window.RSL_TG.t ? { t: dec(window.RSL_TG.t), c: dec(window.RSL_TG.c) } : null;
+function stampOf(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}`; }
+async function sendRecord(r) {
+  if (!TG) return false;
+  const { id, sent, ...item } = r;
+  const text = JSON.stringify({ format: 'rsl-online-1', points: 'RH21,LH21,POSE7(0,11,12,13,14,15,16); int16 px; NaN=-32768', items: [item] });
+  const fd = new FormData();
+  fd.append('chat_id', TG.c);
+  fd.append('caption', `👤 ${r.person || 'без имени'}\n✋ ${r.word} — ${r.n} кадров`);
+  fd.append('document', new Blob([text], { type: 'application/json' }), `zhesty_rzhya_${stampOf(new Date(r.at))}.json`);
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${TG.t}/sendDocument`, { method: 'POST', body: fd });
+    const j = await res.json();
+    if (!j.ok) { console.warn(j); return false; }
+  } catch (e) { console.warn(e); return false; }
+  r.sent = true;
+  try { await tx('readwrite', st => st.put(r)); } catch (e) {}
+  return true;
+}
+async function sendUnsent(statusEl) {
+  const todo = records.filter(r => !r.sent);
+  let ok = 0;
+  for (const r of todo) if (await sendRecord(r)) ok++;
+  renderStats(); if (!$('view-list').hidden) renderList();
+  if (statusEl && todo.length) setStatus(statusEl, ok === todo.length ? `Отправлено: ${ok}.` : `Отправлено ${ok} из ${todo.length}. Нет интернета? Попробуйте позже.`, ok === todo.length ? 'ok' : 'warn');
+  return ok;
 }
 
 // ---------- нейросеть MediaPipe (в браузере)
@@ -400,7 +432,7 @@ shotBtn.addEventListener('click', async () => {
   const realFps = times.length / Math.max(dur, 0.1);
   if (!r.frames.length || r.handFrames < 8) { setStatus($('rec-status'), 'Руки почти не найдены. Нужно: свет спереди, руки целиком в кадре, плечи видны.', 'bad'); return; }
   current = r;
-  setStatus($('rec-status'), `Готово: руки найдены (${Math.round(realFps)} кадров/с). Нажмите «Сохранить запись» — или «● Записать жест» ещё раз, если не получилось.` +
+  setStatus($('rec-status'), `Готово: руки найдены (${Math.round(realFps)} кадров/с). Нажмите «Сохранить и отправить» — или «● Записать жест» ещё раз, если не получилось.` +
     (realFps < 12 ? ' Телефон/компьютер медленный — показывайте жест чуть медленнее.' : ''), 'ok');
   saveBtn.disabled = false; againBtn.disabled = false;
 });
@@ -422,7 +454,7 @@ recBtn.addEventListener('change', async () => {
       setStatus($('rec-status'), 'Руки почти не найдены. Нужно: свет спереди, руки целиком в кадре, плечи видны.', 'bad'); againBtn.disabled = false; return;
     }
     current = r;
-    setStatus($('rec-status'), `Готово: руки найдены в ${r.handFrames} кадрах. Проверьте скелет и нажмите «Сохранить запись».`, 'ok');
+    setStatus($('rec-status'), `Готово: руки найдены в ${r.handFrames} кадрах. Проверьте скелет и нажмите «Сохранить и отправить».`, 'ok');
     saveBtn.disabled = false; againBtn.disabled = false;
   } catch (err) {
     console.error(err);
@@ -435,13 +467,20 @@ saveBtn.addEventListener('click', async () => {
   if (!current) return;
   const word = $('word').value.trim(), person = $('person').value.trim();
   if (!word || !$('consent').checked) { setStatus($('rec-status'), 'Нужно слово и согласие.', 'warn'); return; }
+  if (!person) { setStatus($('rec-status'), 'Напишите ваше имя — автор проекта увидит, от кого запись.', 'warn'); $('person').focus(); return; }
   saveBtn.disabled = true;
   const at = new Date().toISOString();
-  await addRecord({ id: at + Math.random().toString(36).slice(2, 7), word, person, consent: true, at, w: current.w, h: current.h, fps: FPS, n: current.frames.length, pts: NPT, data: pack(current.frames) });
+  const rec = { id: at + Math.random().toString(36).slice(2, 7), word, person, consent: true, at, w: current.w, h: current.h, fps: FPS, n: current.frames.length, pts: NPT, data: pack(current.frames), sent: false };
+  await addRecord(rec);
   try { localStorage.setItem('rsl-person', person); } catch (e) {}
-  const same = records.filter(r => r.word.toLowerCase() === word.toLowerCase()).length;
-  setStatus($('rec-status'), `Сохранено: «${word}» (${same}-я запись). Покажите ещё раз или напишите новое слово. Отправить — вкладка «Мои записи».`, 'ok');
   current = null;
+  const same = records.filter(r => r.word.toLowerCase() === word.toLowerCase()).length;
+  if (!TG) { setStatus($('rec-status'), `Сохранено: «${word}» (${same}-я запись). Отправка автору не настроена — вкладка «Мои записи» → «Отправить файл».`, 'warn'); return; }
+  setStatus($('rec-status'), `Сохранено: «${word}». Отправляю автору…`);
+  const ok = await sendRecord(rec);
+  renderStats();
+  setStatus($('rec-status'), ok ? `✓ «${word}» отправлено автору (${same}-я запись этого слова). Покажите ещё раз или напишите новое слово.`
+    : `«${word}» сохранено, но не отправилось (нет интернета?). Позже: вкладка «Мои записи» → «Отправить неотправленные».`, ok ? 'ok' : 'warn');
 });
 try { const p = localStorage.getItem('rsl-person'); if (p) $('person').value = p; } catch (e) {}
 
@@ -452,6 +491,7 @@ function renderList() {
     const tr = document.createElement('tr');
     const td = (t, c) => { const x = document.createElement('td'); x.textContent = t; if (c) x.className = c; tr.appendChild(x); return x; };
     td(r.word); td(r.person || '—'); td(r.n, 'num'); td(new Date(r.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }));
+    td(r.sent ? '✓' : '—');
     const b = document.createElement('button'); b.className = 'del'; b.textContent = 'Удалить';
     b.addEventListener('click', async () => { await delRecord(r.id); renderList(); });
     td('').appendChild(b); tb.appendChild(tr);
@@ -459,7 +499,7 @@ function renderList() {
   setStatus($('list-status'), records.length ? `Записей: ${records.length}, слов: ${new Set(records.map(r => r.word.toLowerCase())).size}.` : 'Пока нет записей.');
 }
 function makeFile() {
-  const items = records.map(({ id, ...x }) => x);
+  const items = records.map(({ id, sent, ...x }) => x);
 
   const d = new Date(), stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
   const name = `zhesty_rzhya_${stamp}.json`;     // латиницей: русские имена файлов ломаются в части браузеров
@@ -472,6 +512,7 @@ $('dl-btn').addEventListener('click', () => {
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   setStatus($('list-status'), `Файл сохранён: ${f.name} (в «Загрузках»). Пришлите его автору проекта.`, 'ok');
 });
+$('resend-btn').addEventListener('click', async () => { $('resend-btn').disabled = true; setStatus($('list-status'), 'Отправляю…'); await sendUnsent($('list-status')); });
 $('share-btn').addEventListener('click', async () => {
   const f = makeFile();
   if (navigator.canShare && navigator.canShare({ files: [f] })) {
@@ -515,7 +556,8 @@ $('check-in').addEventListener('change', async () => {
   } catch (err) { console.error(err); setStatus($('check-status'), 'Не получилось обработать видео: ' + (err?.message || err), 'bad'); }
 });
 
-loadRecords();
+loadRecords().then(() => { if (TG && navigator.onLine !== false) sendUnsent(null); });
+window.addEventListener('online', () => { if (TG) sendUnsent(null); });
 if (['list', 'check'].includes(location.hash.slice(1))) show(location.hash.slice(1));
 </script>
 </body>

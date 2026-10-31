@@ -110,6 +110,7 @@ canvas.mirror { transform: scaleX(-1); }
     <button role="tab" aria-selected="true" data-view="rec">Записать жест</button>
     <button role="tab" aria-selected="false" data-view="list">Мои записи и отправка</button>
     <button role="tab" aria-selected="false" data-view="check">Проверить жест</button>
+    <button role="tab" aria-selected="false" data-view="who" id="tab-who" hidden>Кто прислал (автор)</button>
   </nav>
 
   <section id="view-rec">
@@ -150,6 +151,15 @@ canvas.mirror { transform: scaleX(-1); }
     </div>
   </section>
 
+  <section id="view-who" hidden>
+    <div class="card">
+      <div class="list-actions"><button class="btn" id="who-refresh">Обновить</button><button class="btn ghost" id="who-logout">Выйти (это устройство)</button></div>
+      <div class="status" id="who-status"></div>
+      <div id="who-box" class="result"></div>
+      <p class="note">Видно только на устройстве, где автор вошёл кодом из Telegram. Те же данные — в закреплённом сообщении бота.</p>
+    </div>
+  </section>
+
   <section id="view-check" hidden>
     <div class="card">
       <p class="note">Черновая проверка: видео с одним жестом сравнивается с вашими записями на этой странице. Настоящий перевод делает программа на компьютере — у неё нейросеть, обученная на 1000 жестах.</p>
@@ -160,6 +170,13 @@ canvas.mirror { transform: scaleX(-1); }
       <div class="result" id="check-result"></div>
     </div>
   </section>
+
+  <footer class="note" id="admin-login">
+    <button class="btn ghost" id="admin-btn" style="font-size:13px;padding:6px 10px">Я автор проекта</button>
+    <span id="admin-code-row" hidden> <input type="text" id="admin-code" inputmode="numeric" placeholder="код" style="width:90px;font:16px var(--font-body);padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)"> <button class="btn" id="admin-ok" style="font-size:13px;padding:6px 10px">Войти</button></span>
+    <span class="status" id="admin-status"></span>
+    <div style="margin-top:6px">Автор проекта видит, кто прислал записи и кто заходил на страницу (имя — если вы его вводили, и время).</div>
+  </footer>
 </div>
 
 <script src="config.js" onerror="window.RSL_TG = null"></script>
@@ -168,7 +185,8 @@ const $ = (id) => document.getElementById(id);
 const tabs = [...document.querySelectorAll('nav button')];
 function show(view) {
   for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset.view === view));
-  for (const v of ['rec', 'list', 'check']) $('view-' + v).hidden = v !== view;
+  for (const v of ['rec', 'list', 'check', 'who']) $('view-' + v).hidden = v !== view;
+  if (view === 'who') renderWho();
   if (view === 'list') renderList();
   try { history.replaceState(null, '', '#' + view); } catch (e) {}
 }
@@ -238,36 +256,95 @@ async function tgCall(method, params) {
 }
 const BOARD_HEAD = '📊 Кто прислал жесты';
 function parseBoard(text) {
-  const people = new Map();
+  const st = { people: new Map(), visits: [], visitsTotal: 0 };
+  let sec = '';
   for (const ln of String(text || '').split('\n')) {
-    const m = ln.match(/^👤 (.+) — (\d+): (.*)$/); if (!m) continue;
-    const words = new Map();
-    for (const part of m[3].split(', ')) { const w = part.match(/^(.+?)(?: ×(\d+))?$/); if (w && w[1]) words.set(w[1], Number(w[2] || 1)); }
-    people.set(m[1], words);
+    if (ln.startsWith('👀')) { sec = 'v'; const m = ln.match(/всего (\d+)/); if (m) st.visitsTotal = Number(m[1]); continue; }
+    const m = ln.match(/^👤 (.+) — (\d+): (.*)$/);
+    if (m) { const words = new Map();
+      for (const part of m[3].split(', ')) { const w = part.match(/^(.+?)(?: ×(\d+))?$/); if (w && w[1]) words.set(w[1], Number(w[2] || 1)); }
+      st.people.set(m[1], words); continue; }
+    if (sec === 'v' && ln.startsWith('• ')) st.visits.push(ln.slice(2));
   }
-  return people;
+  return st;
 }
-function boardText(people) {
-  const all = [...people.entries()].map(([p, ws]) => [p, ws, [...ws.values()].reduce((a, b) => a + b, 0)]);
+function nowStr() { const d = new Date(); return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; }
+function boardText(st) {
+  const all = [...st.people.entries()].map(([p, ws]) => [p, ws, [...ws.values()].reduce((a, b) => a + b, 0)]);
   const total = all.reduce((a, x) => a + x[2], 0), words = new Set(all.flatMap(x => [...x[1].keys()]));
-  const d = new Date(), t = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  const lines = [BOARD_HEAD, `Всего: ${total} записей · ${all.length} чел. · ${words.size} слов`, `обновлено ${t}`, ''];
+  const lines = [BOARD_HEAD, `Всего: ${total} записей · ${all.length} чел. · ${words.size} слов`, `обновлено ${nowStr()}`, ''];
   for (const [p, ws, n] of all.sort((a, b) => b[2] - a[2]))
     lines.push(`👤 ${p} — ${n}: ` + [...ws.entries()].sort((a, b) => b[1] - a[1]).map(([w, k]) => k > 1 ? `${w} ×${k}` : w).join(', '));
-  let txt = lines.join('\n');
+  lines.push('', `👀 Заходили на страницу (всего ${st.visitsTotal}), последние:`);
+  for (const v of st.visits.slice(0, 15)) lines.push('• ' + v);
+  const txt = lines.join('\n');
   return txt.length > 4000 ? txt.slice(0, 3990) + '\n…' : txt;
 }
-async function updateBoard(r) {
+async function readBoard() {
   const chat = await tgCall('getChat', { chat_id: TG.c });
   const pin = chat.pinned_message;
-  const own = pin && pin.from && pin.from.is_bot && String(pin.text || '').startsWith(BOARD_HEAD);
-  const people = parseBoard(own ? pin.text : '');
-  const name = (r.person || 'без имени').replace(/[\n—]/g, ' ').trim(), word = r.word.toLowerCase().replace(/[\n,×]/g, ' ').trim();
-  const ws = people.get(name) || new Map(); ws.set(word, (ws.get(word) || 0) + 1); people.set(name, ws);
-  const text = boardText(people);
-  if (own) { await tgCall('editMessageText', { chat_id: TG.c, message_id: pin.message_id, text }); return; }
+  const own = !!(pin && pin.from && pin.from.is_bot && String(pin.text || '').startsWith(BOARD_HEAD));
+  return { pin: own ? pin : null, st: parseBoard(own ? pin.text : '') };
+}
+async function mutateBoard(fn) {
+  const { pin, st } = await readBoard();
+  fn(st);
+  const text = boardText(st);
+  if (pin) { await tgCall('editMessageText', { chat_id: TG.c, message_id: pin.message_id, text }); return; }
   const m = await tgCall('sendMessage', { chat_id: TG.c, text, disable_notification: true });
   await tgCall('pinChatMessage', { chat_id: TG.c, message_id: m.message_id, disable_notification: true });
+}
+const clean = (x) => String(x || '').replace(/[\n—•,×]/g, ' ').replace(/\s+/g, ' ').trim();
+async function updateBoard(r) {
+  await mutateBoard(st => {
+    const name = clean(r.person) || 'без имени', word = clean(r.word).toLowerCase();
+    const ws = st.people.get(name) || new Map(); ws.set(word, (ws.get(word) || 0) + 1); st.people.set(name, ws);
+  });
+}
+function deviceName() { const u = navigator.userAgent; return /iPhone|iPad/.test(u) ? 'iPhone' : /Android/.test(u) ? 'Android' : /Windows/.test(u) ? 'Windows' : /Mac/.test(u) ? 'Mac' : 'браузер'; }
+async function noteVisit() {                              // кто зашёл: имя (если вводил раньше) и время — видит только автор
+  if (!TG || isAdmin()) return;
+  try { if (sessionStorage.getItem('rsl-visit')) return; sessionStorage.setItem('rsl-visit', '1'); } catch (e) {}
+  let name = ''; try { name = localStorage.getItem('rsl-person') || ''; } catch (e) {}
+  await mutateBoard(st => { st.visitsTotal++; st.visits.unshift(`${clean(name) || 'гость'} (${deviceName()}) — ${nowStr()}`); st.visits = st.visits.slice(0, 15); });
+}
+
+// ---------- вход автора: код приходит ему в Telegram, после этого на этом устройстве видна вкладка «Кто прислал»
+function isAdmin() { try { return localStorage.getItem('rsl-admin') === '1'; } catch (e) { return false; } }
+let adminCode = '';
+async function adminStart() {
+  if (!TG) { setStatus($('admin-status'), 'Отправка автору не настроена (нет config.js).', 'bad'); return; }
+  adminCode = String(Math.floor(1000 + Math.random() * 9000));
+  try { await tgCall('sendMessage', { chat_id: TG.c, text: `🔑 Код для входа автора на страницу: ${adminCode}` });
+    $('admin-code-row').hidden = false; setStatus($('admin-status'), 'Код отправлен в Telegram автору проекта. Введите его.'); }
+  catch (e) { setStatus($('admin-status'), 'Не получилось отправить код: ' + (e?.message || e), 'bad'); }
+}
+function adminCheck() {
+  if (adminCode && $('admin-code').value.trim() === adminCode) {
+    try { localStorage.setItem('rsl-admin', '1'); } catch (e) {}
+    $('tab-who').hidden = false; $('admin-login').hidden = true; show('who');
+  } else setStatus($('admin-status'), 'Неверный код.', 'bad');
+}
+async function renderWho() {
+  const box = $('who-box'), st_ = $('who-status');
+  if (!TG) { setStatus(st_, 'Отправка не настроена.', 'bad'); return; }
+  setStatus(st_, 'Загружаю…');
+  try {
+    const { st } = await readBoard();
+    box.textContent = '';
+    const people = [...st.people.entries()].map(([p, ws]) => ({ p, ws, n: [...ws.values()].reduce((a, b) => a + b, 0) })).sort((a, b) => b.n - a.n);
+    const total = people.reduce((a, x) => a + x.n, 0), words = new Map();
+    for (const x of people) for (const [w, k] of x.ws) { const e = words.get(w) || { n: 0, people: 0 }; e.n += k; e.people++; words.set(w, e); }
+    const table = (head, rows) => { const t = document.createElement('table'); const tr = document.createElement('tr');
+      head.forEach(h => { const th = document.createElement('th'); th.textContent = h; tr.appendChild(th); }); const th_ = document.createElement('thead'); th_.appendChild(tr); t.appendChild(th_);
+      const tb = document.createElement('tbody'); rows.forEach(r => { const row = document.createElement('tr'); r.forEach((c, i) => { const td = document.createElement('td'); td.textContent = c; if (typeof c === 'number') td.className = 'num'; row.appendChild(td); }); tb.appendChild(row); });
+      t.appendChild(tb); const wrap = document.createElement('div'); wrap.style.overflowX = 'auto'; wrap.appendChild(t); return wrap; };
+    const h = (t) => { const e = document.createElement('h3'); e.textContent = t; e.style.margin = '8px 0 0'; e.style.font = '600 16px var(--font-body)'; return e; };
+    box.append(h('Кто прислал'), table(['Кто', 'Записей', 'Слова'], people.map(x => [x.p, x.n, [...x.ws.entries()].sort((a, b) => b[1] - a[1]).map(([w, k]) => k > 1 ? `${w} ×${k}` : w).join(', ')])));
+    box.append(h('Слова'), table(['Слово', 'Записей', 'Людей'], [...words.entries()].sort((a, b) => b[1].n - a[1].n).map(([w, e]) => [w + (e.people < 3 ? '  ← нужно ещё людей' : ''), e.n, e.people])));
+    box.append(h(`Заходили на страницу — всего ${st.visitsTotal}`), table(['Последние заходы'], st.visits.map(v => [v])));
+    setStatus(st_, `Записей: ${total} · людей: ${people.length} · слов: ${words.size}. Обновлено ${nowStr()}.`, 'ok');
+  } catch (e) { setStatus(st_, 'Не загрузилось: ' + (e?.message || e), 'bad'); }
 }
 async function sendUnsent(statusEl) {
   const todo = records.filter(r => !r.sent);
@@ -600,7 +677,14 @@ $('check-in').addEventListener('change', async () => {
 
 loadRecords().then(() => { if (TG && navigator.onLine !== false) sendUnsent(null); });
 window.addEventListener('online', () => { if (TG) sendUnsent(null); });
-if (['list', 'check'].includes(location.hash.slice(1))) show(location.hash.slice(1));
+$('admin-btn').addEventListener('click', adminStart);
+$('admin-ok').addEventListener('click', adminCheck);
+$('admin-code').addEventListener('keydown', e => { if (e.key === 'Enter') adminCheck(); });
+$('who-refresh').addEventListener('click', renderWho);
+$('who-logout').addEventListener('click', () => { try { localStorage.removeItem('rsl-admin'); } catch (e) {} $('tab-who').hidden = true; $('admin-login').hidden = false; show('rec'); });
+if (isAdmin()) { $('tab-who').hidden = false; $('admin-login').hidden = true; }
+noteVisit().catch(e => console.warn('заход', e));
+if (['list', 'check'].includes(location.hash.slice(1)) || (location.hash === '#who' && isAdmin())) show(location.hash.slice(1));
 </script>
 </body>
 </html>

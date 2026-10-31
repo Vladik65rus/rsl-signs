@@ -225,7 +225,49 @@ async function sendRecord(r) {
   } catch (e) { console.warn(e); return false; }
   r.sent = true;
   try { await tx('readwrite', st => st.put(r)); } catch (e) {}
+  try { await updateBoard(r); } catch (e) { console.warn('сводка', e); }
   return true;
+}
+
+// ---------- сводка «Кто прислал» — закреплённое сообщение в чате автора, обновляется при каждой записи
+async function tgCall(method, params) {
+  const body = new URLSearchParams();                    // обычная форма: без предварительного CORS-запроса
+  for (const [k, v] of Object.entries(params)) body.append(k, String(v));
+  const res = await fetch(`https://api.telegram.org/bot${TG.t}/${method}`, { method: 'POST', body });
+  const j = await res.json(); if (!j.ok) throw new Error(j.description || method); return j.result;
+}
+const BOARD_HEAD = '📊 Кто прислал жесты';
+function parseBoard(text) {
+  const people = new Map();
+  for (const ln of String(text || '').split('\n')) {
+    const m = ln.match(/^👤 (.+) — (\d+): (.*)$/); if (!m) continue;
+    const words = new Map();
+    for (const part of m[3].split(', ')) { const w = part.match(/^(.+?)(?: ×(\d+))?$/); if (w && w[1]) words.set(w[1], Number(w[2] || 1)); }
+    people.set(m[1], words);
+  }
+  return people;
+}
+function boardText(people) {
+  const all = [...people.entries()].map(([p, ws]) => [p, ws, [...ws.values()].reduce((a, b) => a + b, 0)]);
+  const total = all.reduce((a, x) => a + x[2], 0), words = new Set(all.flatMap(x => [...x[1].keys()]));
+  const d = new Date(), t = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const lines = [BOARD_HEAD, `Всего: ${total} записей · ${all.length} чел. · ${words.size} слов`, `обновлено ${t}`, ''];
+  for (const [p, ws, n] of all.sort((a, b) => b[2] - a[2]))
+    lines.push(`👤 ${p} — ${n}: ` + [...ws.entries()].sort((a, b) => b[1] - a[1]).map(([w, k]) => k > 1 ? `${w} ×${k}` : w).join(', '));
+  let txt = lines.join('\n');
+  return txt.length > 4000 ? txt.slice(0, 3990) + '\n…' : txt;
+}
+async function updateBoard(r) {
+  const chat = await tgCall('getChat', { chat_id: TG.c });
+  const pin = chat.pinned_message;
+  const own = pin && pin.from && pin.from.is_bot && String(pin.text || '').startsWith(BOARD_HEAD);
+  const people = parseBoard(own ? pin.text : '');
+  const name = (r.person || 'без имени').replace(/[\n—]/g, ' ').trim(), word = r.word.toLowerCase().replace(/[\n,×]/g, ' ').trim();
+  const ws = people.get(name) || new Map(); ws.set(word, (ws.get(word) || 0) + 1); people.set(name, ws);
+  const text = boardText(people);
+  if (own) { await tgCall('editMessageText', { chat_id: TG.c, message_id: pin.message_id, text }); return; }
+  const m = await tgCall('sendMessage', { chat_id: TG.c, text, disable_notification: true });
+  await tgCall('pinChatMessage', { chat_id: TG.c, message_id: m.message_id, disable_notification: true });
 }
 async function sendUnsent(statusEl) {
   const todo = records.filter(r => !r.sent);

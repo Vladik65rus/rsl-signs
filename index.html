@@ -110,7 +110,7 @@ canvas.mirror { transform: scaleX(-1); }
     <button role="tab" aria-selected="true" data-view="rec">Записать жест</button>
     <button role="tab" aria-selected="false" data-view="list">Мои записи и отправка</button>
     <button role="tab" aria-selected="false" data-view="check">Проверить жест</button>
-    <button role="tab" aria-selected="false" data-view="who" id="tab-who" hidden>Кто прислал (автор)</button>
+    <button role="tab" aria-selected="false" data-view="who" id="tab-who" hidden>Все записи — кто прислал</button>
   </nav>
 
   <section id="view-rec">
@@ -156,7 +156,7 @@ canvas.mirror { transform: scaleX(-1); }
       <div class="list-actions"><button class="btn" id="who-refresh">Обновить</button><button class="btn ghost" id="who-logout">Выйти (это устройство)</button></div>
       <div class="status" id="who-status"></div>
       <div id="who-box" class="result"></div>
-      <p class="note">Видно только на устройстве, где автор вошёл кодом из Telegram. Те же данные — в закреплённом сообщении бота.</p>
+      <p class="note">Обновляется само каждые 20 секунд. Видно только автору проекта. Те же данные — в закреплённом сообщении бота.</p>
     </div>
   </section>
 
@@ -187,6 +187,7 @@ function show(view) {
   for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset.view === view));
   for (const v of ['rec', 'list', 'check', 'who']) $('view-' + v).hidden = v !== view;
   if (view === 'who') renderWho();
+  clearInterval(show.t); if (view === 'who') show.t = setInterval(renderWho, 20000);
   if (view === 'list') renderList();
   try { history.replaceState(null, '', '#' + view); } catch (e) {}
 }
@@ -682,9 +683,20 @@ $('admin-ok').addEventListener('click', adminCheck);
 $('admin-code').addEventListener('keydown', e => { if (e.key === 'Enter') adminCheck(); });
 $('who-refresh').addEventListener('click', renderWho);
 $('who-logout').addEventListener('click', () => { try { localStorage.removeItem('rsl-admin'); } catch (e) {} $('tab-who').hidden = true; $('admin-login').hidden = false; show('rec'); });
-if (isAdmin()) { $('tab-who').hidden = false; $('admin-login').hidden = true; }
+// ссылка автора: …/rsl-signs/#author-<ключ> — один раз открыть, и это устройство навсегда «автор» (без кода)
+async function authorKey() { const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('rsl-author:' + TG.t));
+  return [...new Uint8Array(h)].slice(0, 6).map(x => x.toString(16).padStart(2, '0')).join(''); }
+async function checkAuthorLink() {
+  if (!(TG && location.hash.startsWith('#author-'))) return;
+  try { if (location.hash.slice(8) === await authorKey()) localStorage.setItem('rsl-admin', '1'); } catch (e) {}
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  if (isAdmin()) { $('tab-who').hidden = false; $('admin-login').hidden = true; show('who'); }
+}
+window.addEventListener('hashchange', checkAuthorLink);
+await checkAuthorLink();
+if (isAdmin()) { $('tab-who').hidden = false; $('admin-login').hidden = true; show('who'); }
 noteVisit().catch(e => console.warn('заход', e));
-if (['list', 'check'].includes(location.hash.slice(1)) || (location.hash === '#who' && isAdmin())) show(location.hash.slice(1));
+if (['list', 'check'].includes(location.hash.slice(1))) show(location.hash.slice(1));
 </script>
 </body>
 </html>

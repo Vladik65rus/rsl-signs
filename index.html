@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Словарь жестов РЖЯ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;600&display=swap" rel="stylesheet">
+<style>
+/* Сбор жестов РЖЯ: видео -> точки рук и тела в браузере -> файл для программы. Без сервера и без VPN. */
+:root {
+  --bg: #f4f5f2;
+  --surface: #ffffff;
+  --ink: #1b2420;
+  --muted: #5e6b65;
+  --line: #d9ded9;
+  --accent: #1f7a5c;          /* зелёный: «записано, сохранено» */
+  --accent-ink: #ffffff;
+  --hand-r: #e0a400;          /* правая рука — жёлтая, как в программе */
+  --hand-l: #a03ad6;          /* левая — фиолетовая */
+  --warn: #a5560b;
+  --bad: #b3261e;
+  --font-display: "Unbounded", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Golos Text", "Segoe UI", system-ui, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121714; --surface: #1a211d; --ink: #e8eeea; --muted: #9aa8a1; --line: #2c3631;
+    --accent: #3fb68b; --accent-ink: #08130e; --warn: #e3a35a; --bad: #ef7d74; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121714; --surface: #1a211d; --ink: #e8eeea; --muted: #9aa8a1; --line: #2c3631;
+  --accent: #3fb68b; --accent-ink: #08130e; --warn: #e3a35a; --bad: #ef7d74; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.5 var(--font-body); }
+.wrap { max-width: 860px; margin: 0 auto; padding: 20px 16px 48px; display: grid; gap: 18px; }
+header { display: grid; gap: 6px; }
+h1 { font: 600 clamp(22px, 4vw, 30px)/1.2 var(--font-display); margin: 0; text-wrap: balance; }
+.lead { color: var(--muted); max-width: 65ch; margin: 0; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 3px 12px;
+        font-size: 14px; font-variant-numeric: tabular-nums; }
+.chip b { font-weight: 600; }
+nav { display: flex; gap: 6px; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+nav button { border: 0; background: none; color: var(--muted); font: 500 15px var(--font-body);
+             padding: 10px 12px; cursor: pointer; border-bottom: 3px solid transparent; }
+nav button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+nav button:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+section[hidden] { display: none; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: grid; gap: 14px; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+.field { display: grid; gap: 4px; flex: 1 1 200px; }
+label { font-size: 14px; color: var(--muted); }
+input[type=text] { font: 16px var(--font-body); padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px;
+                   background: var(--bg); color: var(--ink); width: 100%; }
+.consent { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--ink); }
+.consent input { margin-top: 3px; width: 18px; height: 18px; accent-color: var(--accent); }
+.btn { border: 0; border-radius: 8px; padding: 10px 16px; font: 600 15px var(--font-body); cursor: pointer;
+       background: var(--accent); color: var(--accent-ink); }
+.btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.file { display: inline-flex; }
+.file input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+canvas { width: 100%; max-width: 480px; aspect-ratio: 4/3; background: #0d1210; border-radius: 10px; display: block; }
+.status { font-size: 14px; color: var(--muted); min-height: 1.5em; }
+.status.ok { color: var(--accent); } .status.bad { color: var(--bad); } .status.warn { color: var(--warn); }
+.bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+th { font-size: 13px; color: var(--muted); font-weight: 500; }
+td.num { text-align: right; }
+.result { display: grid; gap: 6px; }
+.res-row { display: grid; grid-template-columns: 140px 1fr 48px; gap: 10px; align-items: center; }
+.res-row .b { height: 10px; background: var(--line); border-radius: 5px; overflow: hidden; }
+.res-row .b i { display: block; height: 100%; background: var(--accent); }
+.res-row:first-child { font-weight: 600; }
+.note { font-size: 14px; color: var(--muted); max-width: 65ch; }
+ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+@media (max-width: 420px) { .res-row { grid-template-columns: 100px 1fr 40px; } }
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+.list-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+td .del { border: 0; background: none; color: var(--bad); cursor: pointer; font: 500 14px var(--font-body); padding: 2px 4px; }
+.big { font-size: 15px; }
+canvas.mirror { transform: scaleX(-1); }
+.count { font: 600 22px var(--font-display); color: var(--accent); min-height: 1.2em; }
+.rec-on { background: var(--bad) !important; color: #fff !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Словарь жестов РЖЯ</h1>
+    <p class="lead">Сбор жестов для переводчика с русского жестового языка. Снимите короткое видео одного жеста — страница найдёт руки и тело и сохранит только точки (не видео и не лицо). Всё обрабатывается прямо в вашем телефоне или компьютере. Потом нажмите «Отправить файл» и пришлите его автору проекта.</p>
+    <div class="stats">
+      <span class="chip">Записей: <b id="st-recs">0</b></span>
+      <span class="chip">Слов: <b id="st-words">0</b></span>
+      <span class="chip" id="st-model">Нейросеть: загрузится при первом видео</span>
+    </div>
+  </header>
+
+  <nav role="tablist">
+    <button role="tab" aria-selected="true" data-view="rec">Записать жест</button>
+    <button role="tab" aria-selected="false" data-view="list">Мои записи и отправка</button>
+    <button role="tab" aria-selected="false" data-view="check">Проверить жест</button>
+  </nav>
+
+  <section id="view-rec">
+    <div class="card">
+      <div class="row">
+        <div class="field"><label for="word">Слово (перевод жеста)</label><input type="text" id="word" placeholder="например: спасибо" autocomplete="off"></div>
+        <div class="field"><label for="person">Кто показывает (имя или код)</label><input type="text" id="person" placeholder="например: Арина" autocomplete="off"></div>
+      </div>
+      <label class="consent" for="consent"><input type="checkbox" id="consent"><span>Человек на видео согласен, что точки его рук и тела (без видео и лица) будут переданы автору проекта для обучения переводчика.</span></label>
+      <div class="row">
+        <button class="btn" id="cam-btn">Включить камеру</button>
+        <button class="btn" id="shot-btn" hidden>● Записать жест</button>
+        <button class="btn ghost" id="stop-btn" hidden>Стоп</button>
+        <label class="btn ghost file" for="video-in">или выбрать готовое видео…<input type="file" id="video-in" accept="video/*"></label>
+      </div>
+      <div class="count" id="count" aria-live="polite"></div>
+      <video id="cam" playsinline muted hidden></video>
+      <div class="bar"><i id="rec-bar"></i></div>
+      <div class="status" id="rec-status">Нажмите «Включить камеру» и разрешите доступ. В первый раз загрузится нейросеть (около 23 МБ).</div>
+      <canvas id="rec-canvas" width="480" height="360" aria-label="Скелет рук и тела из видео"></canvas>
+      <div class="legend"><span><i class="dot" style="background:var(--hand-r)"></i>правая рука</span><span><i class="dot" style="background:var(--hand-l)"></i>левая рука</span><span><i class="dot" style="background:#cfd8d3"></i>тело</span></div>
+      <div class="row"><button class="btn" id="save-btn" disabled>Сохранить запись</button><button class="btn ghost" id="again-btn" disabled>Другое видео</button></div>
+      <p class="note">Совет: показывайте одно слово 3–5 раз (каждый раз отдельное видео). Свет спереди, руки и плечи целиком в кадре.</p>
+    </div>
+  </section>
+
+  <section id="view-list" hidden>
+    <div class="card">
+      <ol class="steps">
+        <li>Запишите слова на вкладке «Записать жест».</li>
+        <li>Нажмите <b>«Отправить файл»</b> (на телефоне сразу откроется Telegram, ВК, почта) или <b>«Сохранить файл»</b>.</li>
+        <li>Пришлите файл <b>zhesty_rzhya_….json</b> автору проекта. Программа на его компьютере добавит жесты сама.</li>
+      </ol>
+      <div class="list-actions"><button class="btn" id="share-btn" disabled>Отправить файл</button><button class="btn ghost" id="dl-btn" disabled>Сохранить файл</button><button class="btn ghost" id="clear-btn" disabled>Очистить после отправки</button></div>
+      <div class="status" id="list-status"></div>
+      <div style="overflow-x:auto"><table id="list-table"><thead><tr><th>Слово</th><th>Кто</th><th class="num">Кадров</th><th>Когда</th><th></th></tr></thead><tbody></tbody></table></div>
+      <p class="note">Записи хранятся только в этом браузере, пока вы их не отправите. Ничего не уходит в интернет само.</p>
+    </div>
+  </section>
+
+  <section id="view-check" hidden>
+    <div class="card">
+      <p class="note">Черновая проверка: видео с одним жестом сравнивается с вашими записями на этой странице. Настоящий перевод делает программа на компьютере — у неё нейросеть, обученная на 1000 жестах.</p>
+      <div class="row"><label class="btn file" for="check-in">Видео для проверки<input type="file" id="check-in" accept="video/*" capture="user"></label></div>
+      <div class="bar"><i id="check-bar"></i></div>
+      <div class="status" id="check-status"></div>
+      <canvas id="check-canvas" width="480" height="360" aria-label="Скелет из видео для проверки"></canvas>
+      <div class="result" id="check-result"></div>
+    </div>
+  </section>
+</div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const tabs = [...document.querySelectorAll('nav button')];
+function show(view) {
+  for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset.view === view));
+  for (const v of ['rec', 'list', 'check']) $('view-' + v).hidden = v !== view;
+  if (view === 'list') renderList();
+  try { history.replaceState(null, '', '#' + view); } catch (e) {}
+}
+tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.view)));
+
+const POSE_IDX = [0, 11, 12, 13, 14, 15, 16];
+const NPT = 49;
+const FPS = 30, MAX_SEC = 10;
+let hand = null, pose = null, current = null, records = [];
+function setStatus(el, text, cls = '') { el.textContent = text; el.className = 'status' + (cls ? ' ' + cls : ''); }
+
+// ---------- хранилище записей в браузере (IndexedDB)
+const DB_NAME = 'rsl-signs', STORE = 'signs';
+function idb() {
+  return new Promise((res, rej) => { const r = indexedDB.open(DB_NAME, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(STORE, { keyPath: 'id' });
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+}
+async function tx(mode, fn) {
+  const d = await idb();
+  return new Promise((res, rej) => { const t = d.transaction(STORE, mode); const st = t.objectStore(STORE); const out = fn(st);
+    t.oncomplete = () => res(out && out.result !== undefined ? out.result : out); t.onerror = () => rej(t.error); });
+}
+async function loadRecords() {
+  try { records = (await tx('readonly', st => st.getAll())) || []; } catch (e) { console.warn(e); }
+  records.sort((a, b) => a.at < b.at ? 1 : -1); renderStats();
+}
+async function addRecord(r) { records.unshift(r); renderStats(); try { await tx('readwrite', st => st.put(r)); } catch (e) { console.warn(e); } }
+async function delRecord(id) { records = records.filter(r => r.id !== id); renderStats(); try { await tx('readwrite', st => st.delete(id)); } catch (e) {} }
+async function clearRecords() { records = []; renderStats(); try { await tx('readwrite', st => st.clear()); } catch (e) {} }
+function renderStats() {
+  $('st-recs').textContent = records.length;
+  $('st-words').textContent = new Set(records.map(r => r.word.toLowerCase())).size;
+  for (const id of ['share-btn', 'dl-btn', 'clear-btn']) $(id).disabled = !records.length;
+}
+
+// ---------- нейросеть MediaPipe (в браузере)
+async function loadModels() {
+  if (hand) return;
+  $('st-model').textContent = 'Нейросеть: загружаю…';
+  const { FilesetResolver, HandLandmarker, PoseLandmarker } = await import('./vision_bundle.mjs');
+  const fs = await FilesetResolver.forVisionTasks(new URL('./wasm', document.baseURI).href);
+  const buf = async (f) => new Uint8Array(await (await fetch(new URL(f, document.baseURI))).arrayBuffer());
+  const hb = await buf('./hand_landmarker.bin'), pb = await buf('./pose_landmarker_lite.bin');
+  const make = async (delegate) => {
+    const h_ = await HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetBuffer: hb, delegate },
+      runningMode: 'VIDEO', numHands: 2, minHandDetectionConfidence: 0.5, minHandPresenceConfidence: 0.5, minTrackingConfidence: 0.5 });
+    const p_ = await PoseLandmarker.createFromOptions(fs, { baseOptions: { modelAssetBuffer: pb, delegate }, runningMode: 'VIDEO', numPoses: 1 });
+    return [h_, p_];
+  };
+  [hand, pose] = await make('CPU');                       // процессор: надёжно везде (видеокарта на части компьютеров теряет руки)
+  $('st-model').textContent = 'Нейросеть: готова';
+}
+// ---------- один кадр -> точки (49 × 3, пиксели, NaN где нет)
+function detectFrame(video, w, h) {
+  tsBase += 34;
+  const hr = hand.detectForVideo(video, tsBase);
+  const pr = pose.detectForVideo(video, tsBase);
+  const f = new Float32Array(NPT * 3).fill(NaN);
+  const hs = (hr.landmarks || []).map((lm, k) => ({ lm, right: (hr.handednesses?.[k]?.[0]?.categoryName || hr.handedness?.[k]?.[0]?.categoryName) === 'Right' }));
+  if (hs.length === 2 && hs[0].right === hs[1].right) {           // обе «правые» — по месту в кадре
+    hs.sort((a, b) => a.lm[0].x - b.lm[0].x); hs[0].right = false; hs[1].right = true;
+  }
+  for (const { lm, right } of hs) {
+    const off = right ? 0 : 21;
+    lm.forEach((p, j) => { f[(off + j) * 3] = p.x * w; f[(off + j) * 3 + 1] = p.y * h; f[(off + j) * 3 + 2] = p.z * w; });
+  }
+  const pl = pr.landmarks?.[0];
+  if (pl) POSE_IDX.forEach((pi, j) => { const p = pl[pi]; f[(42 + j) * 3] = p.x * w; f[(42 + j) * 3 + 1] = p.y * h; f[(42 + j) * 3 + 2] = p.z * w; });
+  return f;
+}
+function trimHands(frames, w, h) {                       // только отрезок с руками (+5 кадров с краёв)
+  const has = frames.map(f => !isNaN(f[0]) || !isNaN(f[63]));
+  const a = has.indexOf(true), b = has.lastIndexOf(true);
+  if (a < 0) return { frames: [], w, h, handFrames: 0 };
+  return { frames: frames.slice(Math.max(0, a - 5), Math.min(frames.length, b + 6)), w, h, handFrames: has.filter(Boolean).length };
+}
+
+// ---------- видео -> точки (30 кадров/с, как в программе)
+const once = (el, ev) => new Promise(r => el.addEventListener(ev, r, { once: true }));
+let tsBase = 0;
+async function extract(file, canvas, bar, status) {
+  await loadModels();
+  const video = document.createElement('video');
+  video.muted = true; video.playsInline = true; video.preload = 'auto';
+  video.src = URL.createObjectURL(file);
+  await once(video, 'loadedmetadata');
+  if (!isFinite(video.duration) || video.duration <= 0) { video.currentTime = 1e6; await once(video, 'seeked'); }
+  const dur = Math.min(video.duration || MAX_SEC, MAX_SEC);
+  const w = video.videoWidth, h = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  const frames = [];
+  const n = Math.max(1, Math.floor(dur * FPS));
+  for (let i = 0; i < n; i++) {
+    video.currentTime = i / FPS;
+    await once(video, 'seeked');
+    const f = detectFrame(video, w, h);
+    frames.push(f);
+    drawSkeleton(ctx, canvas, video, f, w, h);
+    bar.style.width = Math.round(100 * (i + 1) / n) + '%';
+    if (i % 10 === 0) setStatus(status, `Ищу руки: кадр ${i + 1} из ${n}`);
+  }
+  URL.revokeObjectURL(video.src);
+  return trimHands(frames, w, h);
+}
+
+const HAND_LINKS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+const POSE_LINKS = [[1,2],[1,3],[3,5],[2,4],[4,6]];
+function drawSkeleton(ctx, canvas, video, f, w, h) {
+  const W = canvas.width, H = canvas.height, s = Math.min(W / w, H / h), ox = (W - w * s) / 2, oy = (H - h * s) / 2;
+  ctx.fillStyle = '#0d1210'; ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 0.35; ctx.drawImage(video, ox, oy, w * s, h * s); ctx.globalAlpha = 1;
+  const P = (k) => [ox + f[k * 3] * s, oy + f[k * 3 + 1] * s];
+  const line = (a, b, c, wd) => { if (isNaN(f[a * 3]) || isNaN(f[b * 3])) return; const [x1, y1] = P(a), [x2, y2] = P(b);
+    ctx.strokeStyle = c; ctx.lineWidth = wd; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
+  POSE_LINKS.forEach(([a, b]) => line(42 + a, 42 + b, '#cfd8d3', 2));
+  const cs = getComputedStyle(document.documentElement);
+  const cr = cs.getPropertyValue('--hand-r').trim() || '#e0a400', cl = cs.getPropertyValue('--hand-l').trim() || '#a03ad6';
+  HAND_LINKS.forEach(([a, b]) => { line(a, b, cr, 2.5); line(21 + a, 21 + b, cl, 2.5); });
+}
+
+// ---------- упаковка точек: int16 в base64 (документ базы до 256 КБ)
+function pack(frames) {
+  const a = new Int16Array(frames.length * NPT * 3);
+  frames.forEach((f, i) => f.forEach((v, j) => { a[i * NPT * 3 + j] = isNaN(v) ? -32768 : Math.max(-32767, Math.min(32767, Math.round(v))); }));
+  const bytes = new Uint8Array(a.buffer); let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function unpack(b64, n) {
+  const bin = atob(b64), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const a = new Int16Array(bytes.buffer), out = [];
+  for (let i = 0; i < n; i++) out.push(Float32Array.from(a.subarray(i * NPT * 3, (i + 1) * NPT * 3), v => v === -32768 ? NaN : v));
+  return out;
+}
+
+// ---------- признаки для проверки: кисти относительно плеч, 16 кадров
+function features(frames) {
+  const has = frames.map(f => !isNaN(f[0]) || !isNaN(f[63]));
+  const fr = frames.filter((_, i) => has[i]);
+  if (fr.length < 4) return null;
+  let cx = 0, cy = 0, sw = 0, k = 0;
+  for (const f of fr) { const lx = f[43 * 3], ly = f[43 * 3 + 1], rx = f[44 * 3], ry = f[44 * 3 + 1];
+    if (!isNaN(lx) && !isNaN(rx)) { cx += (lx + rx) / 2; cy += (ly + ry) / 2; sw += Math.hypot(lx - rx, ly - ry); k++; } }
+  if (!k) return null;
+  cx /= k; cy /= k; sw = Math.max(1, sw / k);
+  const T = 16, D = 42 * 2 + 2, v = new Float32Array(T * D);
+  for (let t = 0; t < T; t++) {
+    const f = fr[Math.round(t * (fr.length - 1) / (T - 1))];
+    for (let j = 0; j < 42; j++) { const x = f[j * 3], y = f[j * 3 + 1];
+      v[t * D + j * 2] = isNaN(x) ? 0 : (x - cx) / sw; v[t * D + j * 2 + 1] = isNaN(y) ? 0 : (y - cy) / sw; }
+    v[t * D + 84] = isNaN(f[0]) ? 0 : 1; v[t * D + 85] = isNaN(f[63]) ? 0 : 1;
+  }
+  let nrm = 0; for (const x of v) nrm += x * x; nrm = Math.sqrt(nrm) || 1;
+  return v.map(x => x / nrm);
+}
+
+// ---------- живая камера: точки считаются прямо во время записи, потом приводятся к 30 кадрам/с
+const cam = $('cam'), camBtn = $('cam-btn'), shotBtn = $('shot-btn'), stopBtn = $('stop-btn');
+let stream = null, previewOn = false, recording = false, stopReq = false;
+const nextFrame = () => new Promise(r => cam.requestVideoFrameCallback ? cam.requestVideoFrameCallback(() => r()) : requestAnimationFrame(() => r()));
+async function preview() {
+  const canvas = $('rec-canvas'), ctx = canvas.getContext('2d');
+  previewOn = true;
+  while (previewOn && stream) {
+    await nextFrame();
+    if (recording || !cam.videoWidth) continue;
+    const W = canvas.width, H = canvas.height, w = cam.videoWidth, h = cam.videoHeight, s = Math.min(W / w, H / h);
+    ctx.fillStyle = '#0d1210'; ctx.fillRect(0, 0, W, H); ctx.drawImage(cam, (W - w * s) / 2, (H - h * s) / 2, w * s, h * s);
+  }
+}
+camBtn.addEventListener('click', async () => {
+  if (stream) { stopCamera(); return; }
+  if (!navigator.mediaDevices?.getUserMedia) { setStatus($('rec-status'), 'Этот браузер не даёт камеру. Выберите готовое видео.', 'bad'); return; }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } }, audio: false });
+  } catch (e) {
+    setStatus($('rec-status'), e?.name === 'NotAllowedError' ? 'Доступ к камере запрещён. Нажмите на значок камеры/замка в адресной строке → «Разрешить» и обновите страницу.'
+      : 'Камера не включилась (занята другой программой или её нет). Закройте программу перевода/Zoom и попробуйте ещё раз.', 'bad');
+    return;
+  }
+  cam.srcObject = stream; await cam.play();
+  $('rec-canvas').classList.add('mirror');
+  camBtn.textContent = 'Выключить камеру'; shotBtn.hidden = false;
+  preview();
+  setStatus($('rec-status'), 'Камера включена. Загружаю нейросеть…');
+  try { await loadModels(); setStatus($('rec-status'), 'Готово. Напишите слово, отметьте согласие и нажмите «● Записать жест».', 'ok'); }
+  catch (e) { setStatus($('rec-status'), 'Нейросеть не загрузилась: ' + (e?.message || e), 'bad'); }
+});
+function stopCamera() {
+  previewOn = false; stopReq = true;
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null; cam.srcObject = null;
+  camBtn.textContent = 'Включить камеру'; shotBtn.hidden = true; stopBtn.hidden = true;
+  $('rec-canvas').classList.remove('mirror');
+}
+stopBtn.addEventListener('click', () => { stopReq = true; });
+shotBtn.addEventListener('click', async () => {
+  if (recording || !stream) return;
+  if (!($('word').value.trim() && $('consent').checked)) { setStatus($('rec-status'), 'Сначала напишите слово и отметьте согласие.', 'warn'); return; }
+  saveBtn.disabled = true; againBtn.disabled = true; current = null;
+  await loadModels();
+  shotBtn.disabled = true;
+  for (const k of [3, 2, 1]) { $('count').textContent = `Приготовьтесь… ${k}`; await new Promise(r => setTimeout(r, 700)); }
+  $('count').textContent = '● Запись — покажите жест';
+  recording = true; stopReq = false; stopBtn.hidden = false; shotBtn.classList.add('rec-on');
+  const canvas = $('rec-canvas'), ctx = canvas.getContext('2d'), bar = $('rec-bar');
+  const raw = [], times = [], t0 = performance.now(), LIMIT = 6;
+  try {
+    while (!stopReq) {
+      await nextFrame();
+      const t = (performance.now() - t0) / 1000;
+      if (t > LIMIT) break;
+      const w = cam.videoWidth, h = cam.videoHeight;
+      const f = detectFrame(cam, w, h);
+      raw.push(f); times.push(t);
+      drawSkeleton(ctx, canvas, cam, f, w, h);
+      bar.style.width = Math.round(100 * t / LIMIT) + '%';
+    }
+  } finally {
+    recording = false; stopBtn.hidden = true; shotBtn.disabled = false; shotBtn.classList.remove('rec-on'); $('count').textContent = '';
+  }
+  const dur = times.length ? times[times.length - 1] : 0, out = [];
+  for (let i = 0, j = 0; i < Math.floor(dur * FPS); i++) {          // ровно 30 кадров/с (как в программе)
+    const tt = i / FPS; while (j + 1 < times.length && Math.abs(times[j + 1] - tt) <= Math.abs(times[j] - tt)) j++;
+    out.push(raw[j]);
+  }
+  const r = trimHands(out, cam.videoWidth, cam.videoHeight);
+  const realFps = times.length / Math.max(dur, 0.1);
+  if (!r.frames.length || r.handFrames < 8) { setStatus($('rec-status'), 'Руки почти не найдены. Нужно: свет спереди, руки целиком в кадре, плечи видны.', 'bad'); return; }
+  current = r;
+  setStatus($('rec-status'), `Готово: руки найдены (${Math.round(realFps)} кадров/с). Нажмите «Сохранить запись» — или «● Записать жест» ещё раз, если не получилось.` +
+    (realFps < 12 ? ' Телефон/компьютер медленный — показывайте жест чуть медленнее.' : ''), 'ok');
+  saveBtn.disabled = false; againBtn.disabled = false;
+});
+
+// ---------- запись
+const recBtn = $('video-in'), saveBtn = $('save-btn'), againBtn = $('again-btn');
+recBtn.addEventListener('click', (e) => {
+  if (!($('word').value.trim() && $('consent').checked)) { e.preventDefault(); setStatus($('rec-status'), 'Напишите слово и отметьте согласие — потом выберите видео.', 'warn'); }
+});
+recBtn.addEventListener('change', async () => {
+  const file = recBtn.files[0]; recBtn.value = '';
+  if (!file) return;
+  saveBtn.disabled = true; againBtn.disabled = true; current = null;
+  try {
+    setStatus($('rec-status'), hand ? 'Обрабатываю видео…' : 'Загружаю нейросеть (один раз)…');
+    if (stream) stopCamera();
+    const r = await extract(file, $('rec-canvas'), $('rec-bar'), $('rec-status'));
+    if (!r.frames.length || r.handFrames < 8) {
+      setStatus($('rec-status'), 'Руки почти не найдены. Нужно: свет спереди, руки целиком в кадре, плечи видны.', 'bad'); againBtn.disabled = false; return;
+    }
+    current = r;
+    setStatus($('rec-status'), `Готово: руки найдены в ${r.handFrames} кадрах. Проверьте скелет и нажмите «Сохранить запись».`, 'ok');
+    saveBtn.disabled = false; againBtn.disabled = false;
+  } catch (err) {
+    console.error(err);
+    setStatus($('rec-status'), 'Не получилось обработать видео: ' + (err?.message || err) + '. Попробуйте другое видео (MP4, до 10 с).', 'bad');
+    againBtn.disabled = false;
+  }
+});
+againBtn.addEventListener('click', () => { current = null; saveBtn.disabled = true; $('rec-bar').style.width = '0'; setStatus($('rec-status'), 'Выберите следующее видео.'); });
+saveBtn.addEventListener('click', async () => {
+  if (!current) return;
+  const word = $('word').value.trim(), person = $('person').value.trim();
+  if (!word || !$('consent').checked) { setStatus($('rec-status'), 'Нужно слово и согласие.', 'warn'); return; }
+  saveBtn.disabled = true;
+  const at = new Date().toISOString();
+  await addRecord({ id: at + Math.random().toString(36).slice(2, 7), word, person, consent: true, at, w: current.w, h: current.h, fps: FPS, n: current.frames.length, pts: NPT, data: pack(current.frames) });
+  try { localStorage.setItem('rsl-person', person); } catch (e) {}
+  const same = records.filter(r => r.word.toLowerCase() === word.toLowerCase()).length;
+  setStatus($('rec-status'), `Сохранено: «${word}» (${same}-я запись). Покажите ещё раз или напишите новое слово. Отправить — вкладка «Мои записи».`, 'ok');
+  current = null;
+});
+try { const p = localStorage.getItem('rsl-person'); if (p) $('person').value = p; } catch (e) {}
+
+// ---------- список и отправка файла
+function renderList() {
+  const tb = document.querySelector('#list-table tbody'); tb.textContent = '';
+  for (const r of records) {
+    const tr = document.createElement('tr');
+    const td = (t, c) => { const x = document.createElement('td'); x.textContent = t; if (c) x.className = c; tr.appendChild(x); return x; };
+    td(r.word); td(r.person || '—'); td(r.n, 'num'); td(new Date(r.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }));
+    const b = document.createElement('button'); b.className = 'del'; b.textContent = 'Удалить';
+    b.addEventListener('click', async () => { await delRecord(r.id); renderList(); });
+    td('').appendChild(b); tb.appendChild(tr);
+  }
+  setStatus($('list-status'), records.length ? `Записей: ${records.length}, слов: ${new Set(records.map(r => r.word.toLowerCase())).size}.` : 'Пока нет записей.');
+}
+function makeFile() {
+  const items = records.map(({ id, ...x }) => x);
+
+  const d = new Date(), stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+  const name = `zhesty_rzhya_${stamp}.json`;     // латиницей: русские имена файлов ломаются в части браузеров
+  const text = JSON.stringify({ format: 'rsl-online-1', points: 'RH21,LH21,POSE7(0,11,12,13,14,15,16); int16 px; NaN=-32768', items });
+  return new File([text], name, { type: 'application/json' });
+}
+$('dl-btn').addEventListener('click', () => {
+  const f = makeFile(), a = document.createElement('a');
+  a.href = URL.createObjectURL(f); a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  setStatus($('list-status'), `Файл сохранён: ${f.name} (в «Загрузках»). Пришлите его автору проекта.`, 'ok');
+});
+$('share-btn').addEventListener('click', async () => {
+  const f = makeFile();
+  if (navigator.canShare && navigator.canShare({ files: [f] })) {
+    try { await navigator.share({ files: [f], title: 'Жесты РЖЯ', text: `Жесты для переводчика: ${records.length} записей` });
+      setStatus($('list-status'), 'Отправлено. Можно очистить список.', 'ok'); }
+    catch (e) { if (e?.name !== 'AbortError') setStatus($('list-status'), 'Не отправилось — нажмите «Сохранить файл» и пришлите его вручную.', 'warn'); }
+  } else { $('dl-btn').click(); }
+});
+$('clear-btn').addEventListener('click', async () => {
+  const b = $('clear-btn');
+  if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'Точно очистить? Нажмите ещё раз'; setTimeout(() => { b.dataset.armed = ''; b.textContent = 'Очистить после отправки'; }, 4000); return; }
+  b.dataset.armed = ''; b.textContent = 'Очистить после отправки';
+  await clearRecords(); renderList();
+});
+
+// ---------- черновая проверка по своим записям
+$('check-in').addEventListener('change', async () => {
+  const file = $('check-in').files[0]; $('check-in').value = '';
+  if (!file) return;
+  const res = $('check-result'); res.textContent = '';
+  try {
+    const r = await extract(file, $('check-canvas'), $('check-bar'), $('check-status'));
+    const q = r.frames.length ? features(r.frames) : null;
+    if (!q) { setStatus($('check-status'), 'Руки или плечи не найдены — снимите при хорошем свете.', 'bad'); return; }
+    const lib = []; for (const x of records) { try { const f = features(unpack(x.data, x.n)); if (f) lib.push({ word: x.word, f }); } catch (e) {} }
+    if (!lib.length) { setStatus($('check-status'), 'Сначала запишите несколько слов.', 'warn'); return; }
+    const per = new Map();
+    for (const e of lib) { let s = 0; for (let i = 0; i < q.length; i++) s += q[i] * e.f[i];
+      const k = e.word.toLowerCase(); (per.get(k) || per.set(k, { word: e.word, s: [] }).get(k)).s.push(s); }
+    const scored = [...per.values()].map(e => ({ word: e.word, v: e.s.sort((a, b) => b - a).slice(0, 3).reduce((a, b) => a + b, 0) / Math.min(3, e.s.length) }))
+      .sort((a, b) => b.v - a.v).slice(0, 5);
+    for (const e of scored) {
+      const row = document.createElement('div'); row.className = 'res-row';
+      const pct = Math.max(0, Math.round(e.v * 100));
+      const name = document.createElement('span'); name.textContent = e.word;
+      const b = document.createElement('span'); b.className = 'b'; const i = document.createElement('i'); i.style.width = pct + '%'; b.appendChild(i);
+      const p = document.createElement('span'); p.textContent = pct + '%';
+      row.append(name, b, p); res.appendChild(row);
+    }
+    setStatus($('check-status'), scored[0].v > 0.85 ? `Похоже на «${scored[0].word}».` : 'Уверенного совпадения нет.', scored[0].v > 0.85 ? 'ok' : 'warn');
+  } catch (err) { console.error(err); setStatus($('check-status'), 'Не получилось обработать видео: ' + (err?.message || err), 'bad'); }
+});
+
+loadRecords();
+if (['list', 'check'].includes(location.hash.slice(1))) show(location.hash.slice(1));
+</script>
+</body>
+</html>

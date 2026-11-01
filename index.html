@@ -269,7 +269,10 @@ function parseBoard(text) {
   }
   return st;
 }
-function nowStr() { const d = new Date(); return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; }
+function nowStr() {                                      // время автора (Новосибирск), а не часы телефона гостя
+  try { return new Date().toLocaleString('ru-RU', { timeZone: 'Asia/Novosibirsk', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', ''); }
+  catch (e) { const d = new Date(); return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; }
+}
 function boardText(st) {
   const all = [...st.people.entries()].map(([p, ws]) => [p, ws, [...ws.values()].reduce((a, b) => a + b, 0)]);
   const total = all.reduce((a, x) => a + x[2], 0), words = new Set(all.flatMap(x => [...x[1].keys()]));
@@ -378,22 +381,90 @@ async function loadModels() {
   [hand, pose] = await make('CPU');                       // процессор: надёжно везде (видеокарта на части компьютеров теряет руки)
   $('st-model').textContent = 'Нейросеть: готова';
 }
+// ---------- руки по сторонам — как HandTracker в программе rsl.py:
+// правая всегда жёлтая, левая всегда фиолетовая, без перескоков цвета; сбои MediaPipe (вторая копия руки,
+// «съёжившийся» скелет, «рука» на коже груди) отбрасываются.
+const P_LS = 43, P_RS = 44, P_LW = 47, P_RW = 48, GHOST_POSE = 0.6, GHOST_FAR = 1.1;
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+function diagOf(hd) { let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const p of hd) { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); } return Math.hypot(x1 - x0, y1 - y0); }
+class HandTracker {
+  constructor() { this.last = [null, null]; this.age = [99, 99]; this.scale = null; }
+  atHead(hd, ls, rs, sc) {
+    if (!ls || !rs) return false;
+    const mid = [(ls[0] + rs[0]) / 2, (ls[1] + rs[1]) / 2];
+    let cx = 0, cy = 0; for (const p of hd) { cx += p[0]; cy += p[1]; } cx /= hd.length; cy /= hd.length;
+    return cy < mid[1] - 0.15 * sc && Math.abs(cx - mid[0]) < 0.75 * sc && diagOf(hd) >= 0.35 * sc;
+  }
+  assign(hands, labels, pt) {                              // pt(k) -> [x, y] точки тела или null
+    const ls = pt(P_LS), rs = pt(P_RS);
+    if (ls && rs) { const sw = dist(ls, rs); if (sw > 1) this.scale = this.scale == null ? sw : 0.9 * this.scale + 0.1 * sw; }
+    let sc = this.scale;
+    if (sc == null) { const sz = hands.map(hd => dist(hd[9], hd[0])); sc = 4 * (sz.length ? sz.reduce((a, b) => a + b) / sz.length : 50); }
+    const wr = [pt(P_RW), pt(P_LW)];
+    const cost = (hd, lab, s) => {
+      let c = wr[s] ? dist(hd[0], wr[s]) / sc : 0.5;
+      c += (this.last[s] && this.age[s] <= 15) ? 0.7 * dist(hd[0], this.last[s]) / sc : 0.35;
+      if (lab != null && lab !== s) c += 0.25;
+      return c;
+    };
+    let H = hands.map((hd, i) => ({ hd, lab: labels[i] }));
+    if (this.scale != null) H = H.filter(x => diagOf(x.hd) >= 0.28 * sc);          // «съёжившийся» скелет — сбой
+    const vw = wr.filter(Boolean);
+    if (vw.length && this.scale != null) H = H.filter(x => {                          // «рука» на коже тела — сбой
+      const dpose = Math.min(...vw.map(w => dist(x.hd[0], w))) / sc;
+      let track = 9; for (const s of [0, 1]) if (this.last[s] && this.age[s] <= 3) track = Math.min(track, dist(x.hd[0], this.last[s]) / sc);
+      return !(((dpose > GHOST_POSE && track > 0.35) || dpose > GHOST_FAR) && !this.atHead(x.hd, ls, rs, sc));
+    });
+    if (H.length === 2) {                                   // вторая маленькая копия поверх пальцев той же руки
+      const sz = H.map(x => diagOf(x.hd)); const [b, sm] = sz[0] >= sz[1] ? [0, 1] : [1, 0];
+      if (sz[sm] < 0.7 * sz[b]) {
+        const big = H[b].hd, small = H[sm].hd;
+        const onTop = small.filter(p => Math.min(...big.map(q => dist(p, q))) < 0.12 * sz[b]).length / small.length;
+        const wOnF = Math.min(...big.slice(5).map(q => dist(q, small[0]))) < 0.25 * sz[b];
+        if (onTop >= 0.8 && wOnF) H = [H[b]];
+      }
+    }
+    if (H.length > 2) H = H.map(x => ({ x, c: Math.min(cost(x.hd, x.lab, 0), cost(x.hd, x.lab, 1)) })).sort((a, b) => a.c - b.c).slice(0, 2).map(y => y.x);
+    if (H.length === 2) {
+      let d = 0; for (let j = 0; j < 21; j++) d += dist(H[0].hd[j], H[1].hd[j]); d = d / 21 / sc;
+      let same = d < 0.12;
+      if (!same && wr[0] && wr[1]) {                         // обе кисти у одного запястья тела — одна рука дважды
+        const dw = dist(H[0].hd[0], H[1].hd[0]) / sc, near = H.map(x => [0, 1].map(k => dist(x.hd[0], wr[k]) / sc));
+        for (const k of [0, 1]) if (dw < 0.35 && near[0][k] < 0.45 && near[1][k] < 0.45 && Math.min(near[0][1 - k], near[1][1 - k]) > 0.9) same = true;
+      }
+      if (same) {
+        const sz = H.map(x => diagOf(x.hd));
+        const keep = Math.max(...sz) > 1.2 * Math.min(...sz) ? (sz[0] >= sz[1] ? 0 : 1)
+          : (Math.min(cost(H[0].hd, H[0].lab, 0), cost(H[0].hd, H[0].lab, 1)) <= Math.min(cost(H[1].hd, H[1].lab, 0), cost(H[1].hd, H[1].lab, 1)) ? 0 : 1);
+        H = [H[keep]];
+      }
+    }
+    let out = [null, null];
+    if (H.length === 1) out[cost(H[0].hd, H[0].lab, 0) <= cost(H[0].hd, H[0].lab, 1) ? 0 : 1] = H[0].hd;
+    else if (H.length === 2) {
+      const a = cost(H[0].hd, H[0].lab, 0) + cost(H[1].hd, H[1].lab, 1), b = cost(H[0].hd, H[0].lab, 1) + cost(H[1].hd, H[1].lab, 0);
+      out = a <= b ? [H[0].hd, H[1].hd] : [H[1].hd, H[0].hd];
+    }
+    for (const s of [0, 1]) { if (out[s]) { this.last[s] = [out[s][0][0], out[s][0][1]]; this.age[s] = 0; } else this.age[s]++; }
+    return out;
+  }
+}
+let tracker = new HandTracker();
+
 // ---------- один кадр -> точки (49 × 3, пиксели, NaN где нет)
 function detectFrame(video, w, h) {
   tsBase += 34;
   const hr = hand.detectForVideo(video, tsBase);
   const pr = pose.detectForVideo(video, tsBase);
   const f = new Float32Array(NPT * 3).fill(NaN);
-  const hs = (hr.landmarks || []).map((lm, k) => ({ lm, right: (hr.handednesses?.[k]?.[0]?.categoryName || hr.handedness?.[k]?.[0]?.categoryName) === 'Right' }));
-  if (hs.length === 2 && hs[0].right === hs[1].right) {           // обе «правые» — по месту в кадре
-    hs.sort((a, b) => a.lm[0].x - b.lm[0].x); hs[0].right = false; hs[1].right = true;
-  }
-  for (const { lm, right } of hs) {
-    const off = right ? 0 : 21;
-    lm.forEach((p, j) => { f[(off + j) * 3] = p.x * w; f[(off + j) * 3 + 1] = p.y * h; f[(off + j) * 3 + 2] = p.z * w; });
-  }
   const pl = pr.landmarks?.[0];
   if (pl) POSE_IDX.forEach((pi, j) => { const p = pl[pi]; f[(42 + j) * 3] = p.x * w; f[(42 + j) * 3 + 1] = p.y * h; f[(42 + j) * 3 + 2] = p.z * w; });
+  const vis = (k) => pl ? (pl[POSE_IDX[k - 42]].visibility ?? 1) : 0;
+  const pt = (k) => (isNaN(f[k * 3]) || vis(k) < 0.3) ? null : [f[k * 3], f[k * 3 + 1]];
+  const hands = (hr.landmarks || []).map(lm => lm.map(p => [p.x * w, p.y * h, p.z * w]));
+  const labels = (hr.landmarks || []).map((_, k) => ((hr.handednesses?.[k]?.[0]?.categoryName || hr.handedness?.[k]?.[0]?.categoryName) === 'Right') ? 0 : 1);
+  const [right, left] = tracker.assign(hands, labels, pt);
+  for (const [hd, off] of [[right, 0], [left, 21]]) if (hd) hd.forEach((p, j) => { f[(off + j) * 3] = p[0]; f[(off + j) * 3 + 1] = p[1]; f[(off + j) * 3 + 2] = p[2]; });
   return f;
 }
 function trimHands(frames, w, h) {                       // только отрезок с руками (+5 кадров с краёв)
@@ -417,6 +488,7 @@ async function extract(file, canvas, bar, status) {
   const w = video.videoWidth, h = video.videoHeight;
   const ctx = canvas.getContext('2d');
   const frames = [];
+  tracker = new HandTracker();
   const n = Math.max(1, Math.floor(dur * FPS));
   for (let i = 0; i < n; i++) {
     video.currentTime = i / FPS;
@@ -486,6 +558,8 @@ function features(frames) {
 // ---------- живая камера: точки считаются прямо во время записи, потом приводятся к 30 кадрам/с
 const cam = $('cam'), camBtn = $('cam-btn'), shotBtn = $('shot-btn'), stopBtn = $('stop-btn');
 let stream = null, previewOn = false, recording = false, stopReq = false;
+const snap = document.createElement('canvas');           // один и тот же кадр и для нейросети, и для рисунка
+function grab() { const w = cam.videoWidth, h = cam.videoHeight; if (snap.width !== w) snap.width = w; if (snap.height !== h) snap.height = h; snap.getContext('2d').drawImage(cam, 0, 0, w, h); return snap; }
 const nextFrame = () => new Promise(r => cam.requestVideoFrameCallback ? cam.requestVideoFrameCallback(() => r()) : requestAnimationFrame(() => r()));
 async function preview() {
   const canvas = $('rec-canvas'), ctx = canvas.getContext('2d');
@@ -494,6 +568,7 @@ async function preview() {
     await nextFrame();
     if (recording || !cam.videoWidth) continue;
     const W = canvas.width, H = canvas.height, w = cam.videoWidth, h = cam.videoHeight, s = Math.min(W / w, H / h);
+    if (hand && pose) { const fr = grab(); drawSkeleton(ctx, canvas, fr, detectFrame(fr, w, h), w, h); continue; }   // руки видны сразу, как в программе
     ctx.fillStyle = '#0d1210'; ctx.fillRect(0, 0, W, H); ctx.drawImage(cam, (W - w * s) / 2, (H - h * s) / 2, w * s, h * s);
   }
 }
@@ -534,15 +609,16 @@ shotBtn.addEventListener('click', async () => {
   recording = true; stopReq = false; stopBtn.hidden = false; shotBtn.classList.add('rec-on');
   const canvas = $('rec-canvas'), ctx = canvas.getContext('2d'), bar = $('rec-bar');
   const raw = [], times = [], t0 = performance.now(), LIMIT = 6;
+  tracker = new HandTracker();
   try {
     while (!stopReq) {
       await nextFrame();
       const t = (performance.now() - t0) / 1000;
       if (t > LIMIT) break;
       const w = cam.videoWidth, h = cam.videoHeight;
-      const f = detectFrame(cam, w, h);
+      const fr = grab(), f = detectFrame(fr, w, h);
       raw.push(f); times.push(t);
-      drawSkeleton(ctx, canvas, cam, f, w, h);
+      drawSkeleton(ctx, canvas, fr, f, w, h);
       bar.style.width = Math.round(100 * t / LIMIT) + '%';
     }
   } finally {

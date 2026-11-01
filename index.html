@@ -90,6 +90,15 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
 td .del { border: 0; background: none; color: var(--bad); cursor: pointer; font: 500 14px var(--font-body); padding: 2px 4px; }
 .big { font-size: 15px; }
 canvas.mirror { transform: scaleX(-1); }
+.pick { display: grid; gap: 10px; }
+.pick-label { font-size: 14px; color: var(--muted); }
+select { font: 15px var(--font-body); padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); max-width: 100%; }
+.btn.small { padding: 7px 12px; font-size: 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chips button { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 6px 14px; font: 500 15px var(--font-body); cursor: pointer; }
+.chips button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.chips button .done { color: var(--muted); font-size: 13px; margin-left: 4px; }
+.chips button[aria-pressed="true"] .done { color: var(--accent-ink); }
 .count { font: 600 22px var(--font-display); color: var(--accent); min-height: 1.2em; }
 .rec-on { background: var(--bad) !important; color: #fff !important; }
 </style>
@@ -116,8 +125,16 @@ canvas.mirror { transform: scaleX(-1); }
   <section id="view-rec">
     <div class="card">
       <div class="row">
-        <div class="field"><label for="word">Слово (перевод жеста)</label><input type="text" id="word" placeholder="например: спасибо" autocomplete="off"></div>
+        <div class="field"><label for="word">Слово (перевод жеста)</label><input type="text" id="word" placeholder="начните печатать или выберите ниже" autocomplete="off" list="words-all"><datalist id="words-all"></datalist></div>
         <div class="field"><label for="person">Ваше имя (видит только автор проекта)</label><input type="text" id="person" placeholder="например: Никита" autocomplete="off"></div>
+      </div>
+      <div class="pick">
+        <div class="row" style="align-items:center;gap:8px">
+          <span class="pick-label">Не знаете, что записать? Тема:</span>
+          <select id="topic"></select>
+          <button class="btn ghost small" id="dice" type="button">Подсказать слово</button>
+        </div>
+        <div class="chips" id="chips" aria-label="Слова для записи"></div>
       </div>
       <label class="consent" for="consent"><input type="checkbox" id="consent"><span>Человек на видео согласен, что точки его рук и тела (без видео и лица) будут переданы автору проекта для обучения переводчика.</span></label>
       <div class="row">
@@ -213,7 +230,7 @@ async function tx(mode, fn) {
 }
 async function loadRecords() {
   try { records = (await tx('readonly', st => st.getAll())) || []; } catch (e) { console.warn(e); }
-  records.sort((a, b) => a.at < b.at ? 1 : -1); renderStats();
+  records.sort((a, b) => a.at < b.at ? 1 : -1); renderStats(); try { renderChips(); } catch (e) {}
 }
 async function addRecord(r) { records.unshift(r); renderStats(); try { await tx('readwrite', st => st.put(r)); } catch (e) { console.warn(e); } }
 async function delRecord(id) { records = records.filter(r => r.id !== id); renderStats(); try { await tx('readwrite', st => st.delete(id)); } catch (e) {} }
@@ -638,6 +655,46 @@ shotBtn.addEventListener('click', async () => {
   saveBtn.disabled = false; againBtn.disabled = false;
 });
 
+// ---------- выбор слова: весь словарь программы + темы + «подсказать слово» (для тех, кто не знает, что записать)
+let WORDS = { all: [], topics: {} };
+function myCount(w) { const k = w.toLowerCase(); return records.filter(r => r.word.toLowerCase() === k).length; }
+function renderChips(highlight) {
+  const t = $('topic').value, box = $('chips'); box.textContent = '';
+  let list = t === '*' ? WORDS.all : (WORDS.topics[t] || []);
+  if (t === '*') list = list.filter(w => myCount(w) < 3).slice(0, 0);   // весь словарь — через поиск и «Подсказать»
+  const cur = $('word').value.trim().toLowerCase();
+  for (const w of list.slice(0, 40)) {
+    const b = document.createElement('button'); b.type = 'button';
+    b.textContent = w; b.setAttribute('aria-pressed', String(w.toLowerCase() === cur));
+    const n = myCount(w); if (n) { const d = document.createElement('span'); d.className = 'done'; d.textContent = '✓' + n; b.appendChild(d); }
+    b.addEventListener('click', () => pickWord(w));
+    box.appendChild(b);
+  }
+  if (t === '*') { const p = document.createElement('span'); p.className = 'pick-label'; p.textContent = `В словаре ${WORDS.all.length} слов — начните печатать в поле «Слово» или нажмите «Подсказать слово».`; box.appendChild(p); }
+}
+function pickWord(w) {
+  $('word').value = w; renderChips();
+  setStatus($('rec-status'), stream ? `Слово «${w}». Нажмите «● Записать жест».` : `Слово «${w}». Включите камеру и покажите жест.`, 'ok');
+}
+function suggest() {                                       // сначала «Самые нужные», потом тема, потом весь словарь; что вы уже записали 2+ раза — пропускаем
+  const t = $('topic').value;
+  const pools = [WORDS.topics['Самые нужные'] || [], t !== '*' ? (WORDS.topics[t] || []) : [], WORDS.all];
+  const fresh = (pool) => pool.filter(w => myCount(w) < 2 && w.toLowerCase() !== $('word').value.trim().toLowerCase());
+  const pool = t === 'Самые нужные' || t === '*' ? (fresh(pools[0]).length ? fresh(pools[0]) : fresh(pools[2])) : (fresh(pools[1]).length ? fresh(pools[1]) : fresh(pools[2]));
+  if (pool.length) pickWord(pool[Math.floor(Math.random() * Math.min(pool.length, t === '*' ? pool.length : 12))]);
+}
+async function loadWords() {
+  try { WORDS = await (await fetch(new URL('./words.json', document.baseURI))).json(); } catch (e) { console.warn('words.json', e); }
+  const dl = $('words-all'); for (const w of WORDS.all) { const o = document.createElement('option'); o.value = w; dl.appendChild(o); }
+  const sel = $('topic');
+  for (const t of [...Object.keys(WORDS.topics), '*']) { const o = document.createElement('option'); o.value = t; o.textContent = t === '*' ? `Весь словарь (${WORDS.all.length})` : t; sel.appendChild(o); }
+  try { const t = localStorage.getItem('rsl-topic'); if (t && [...sel.options].some(o => o.value === t)) sel.value = t; } catch (e) {}
+  renderChips();
+}
+$('topic').addEventListener('change', () => { try { localStorage.setItem('rsl-topic', $('topic').value); } catch (e) {} renderChips(); });
+$('dice').addEventListener('click', suggest);
+$('word').addEventListener('input', () => renderChips());
+
 // ---------- запись
 const recBtn = $('video-in'), saveBtn = $('save-btn'), againBtn = $('again-btn');
 recBtn.addEventListener('click', (e) => {
@@ -680,7 +737,8 @@ saveBtn.addEventListener('click', async () => {
   setStatus($('rec-status'), `Сохранено: «${word}». Отправляю автору…`);
   const ok = await sendRecord(rec);
   renderStats();
-  setStatus($('rec-status'), ok ? `✓ «${word}» отправлено автору (${same}-я запись этого слова). Покажите ещё раз или напишите новое слово.`
+  renderChips();
+  setStatus($('rec-status'), ok ? `✓ «${word}» отправлено автору (${same}-я запись этого слова). Покажите ещё раз — или «Подсказать слово» для следующего.`
     : `«${word}» сохранено, но не отправилось (нет интернета?). Позже: вкладка «Мои записи» → «Отправить неотправленные».`, ok ? 'ok' : 'warn');
 });
 try { const p = localStorage.getItem('rsl-person'); if (p) $('person').value = p; } catch (e) {}
@@ -757,6 +815,7 @@ $('check-in').addEventListener('change', async () => {
   } catch (err) { console.error(err); setStatus($('check-status'), 'Не получилось обработать видео: ' + (err?.message || err), 'bad'); }
 });
 
+loadWords();
 loadRecords().then(async () => { if (TG && navigator.onLine !== false) { await boardOld().catch(e => console.warn(e)); await sendUnsent(null); } });
 window.addEventListener('online', () => { if (TG) sendUnsent(null); });
 $('admin-btn').addEventListener('click', adminStart);

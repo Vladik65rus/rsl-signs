@@ -213,7 +213,10 @@ tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.view)));
 const POSE_IDX = [0, 11, 12, 13, 14, 15, 16];
 const NPT = 49;
 const FPS = 30, MAX_SEC = 10;
-let hand = null, pose = null, current = null, records = [];
+let hand = null, pose = null, face = null, handGPU = null, current = null, records = [];
+let gpuState = 'none';                                  // none | testing | ok | off — видеокарта для рук (быстрее на телефоне)
+const gpuStat = { cpu: 0, both: 0 };
+let frameN = 0, lastPose = null, lastFace = null;
 function setStatus(el, text, cls = '') { el.textContent = text; el.className = 'status' + (cls ? ' ' + cls : ''); }
 
 // ---------- хранилище записей в браузере (IndexedDB)
@@ -385,7 +388,7 @@ async function sendUnsent(statusEl) {
 async function loadModels() {
   if (hand) return;
   $('st-model').textContent = 'Нейросеть: загружаю…';
-  const { FilesetResolver, HandLandmarker, PoseLandmarker } = await import('./vision_bundle.mjs');
+  const { FilesetResolver, HandLandmarker, PoseLandmarker, FaceLandmarker } = await import('./vision_bundle.mjs');
   const fs = await FilesetResolver.forVisionTasks(new URL('./wasm', document.baseURI).href);
   const buf = async (f) => new Uint8Array(await (await fetch(new URL(f, document.baseURI))).arrayBuffer());
   const hb = await buf('./hand_landmarker.bin'), pb = await buf('./pose_landmarker_lite.bin');
@@ -396,6 +399,15 @@ async function loadModels() {
     return [h_, p_];
   };
   [hand, pose] = await make('CPU');                       // процессор: надёжно везде (видеокарта на части компьютеров теряет руки)
+  try {                                                   // лицо: брови, глаза, губы, нос — только для экрана, НЕ сохраняется
+    face = await FaceLandmarker.createFromOptions(fs, { baseOptions: { modelAssetBuffer: await buf('./face_landmarker.bin'), delegate: 'CPU' },
+      runningMode: 'VIDEO', numFaces: 1 });
+  } catch (e) { console.warn('лицо', e); }
+  try {                                                   // видеокарта для рук: проверяется на живых кадрах против процессора
+    handGPU = await HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetBuffer: hb, delegate: 'GPU' },
+      runningMode: 'VIDEO', numHands: 2, minHandDetectionConfidence: 0.5, minHandPresenceConfidence: 0.5, minTrackingConfidence: 0.5 });
+    gpuState = 'testing';
+  } catch (e) { gpuState = 'off'; console.warn('GPU нет', e); }
   $('st-model').textContent = 'Нейросеть: готова';
 }
 // ---------- руки по сторонам — как HandTracker в программе rsl.py:
@@ -469,12 +481,34 @@ class HandTracker {
 let tracker = new HandTracker();
 
 // ---------- один кадр -> точки (49 × 3, пиксели, NaN где нет)
-function detectFrame(video, w, h) {
-  tsBase += 34;
+function handsOf(video) {
+  // видеокарта: первые кадры с руками сверяются с процессором; совпадает — дальше только она (в 2–4 раза быстрее)
+  if (gpuState === 'ok') { try { return handGPU.detectForVideo(video, tsBase); } catch (e) { gpuState = 'off'; } }
   const hr = hand.detectForVideo(video, tsBase);
-  const pr = pose.detectForVideo(video, tsBase);
+  if (gpuState === 'testing') {
+    try {
+      const t0 = performance.now();
+      const hg = handGPU.detectForVideo(video, tsBase);
+      const dt = performance.now() - t0;
+      gpuStat.n = (gpuStat.n || 0) + 1;
+      if (gpuStat.n > 3 && dt > 60) { gpuState = 'off'; return hr; }   // видеокарта медленная (нет настоящей) — не мучить
+      const nc = (hr.landmarks || []).length, ng = (hg.landmarks || []).length;
+      if (nc) { gpuStat.cpu++; if (ng === nc) gpuStat.both++; }
+      if (gpuStat.cpu >= 15) gpuState = gpuStat.both >= 0.8 * gpuStat.cpu ? 'ok' : 'off';
+      else if (gpuStat.n > 150) gpuState = 'off';                        // 5 с без рук — проверка не идёт, без GPU
+    } catch (e) { gpuState = 'off'; }
+  }
+  return hr;
+}
+function detectFrame(video, w, h, live = false) {
+  tsBase += 34; frameN++;
+  const hr = handsOf(video);
+  // тело и лицо меняются медленно: вживую — тело каждый 2-й кадр, лицо каждый 3-й (так телефон держит до 30 к/с)
+  let pl = lastPose;
+  if (!live || frameN % 2 === 0 || !lastPose) { const pr = pose.detectForVideo(video, tsBase); pl = pr.landmarks?.[0] || null; lastPose = pl; }
+  if (live && face && frameN % 3 === 0) { try { const fr_ = face.detectForVideo(video, tsBase); lastFace = fr_.faceLandmarks?.[0] ? { pts: fr_.faceLandmarks[0], w, h } : null; } catch (e) {} }
+  if (!live) lastFace = null;
   const f = new Float32Array(NPT * 3).fill(NaN);
-  const pl = pr.landmarks?.[0];
   if (pl) POSE_IDX.forEach((pi, j) => { const p = pl[pi]; f[(42 + j) * 3] = p.x * w; f[(42 + j) * 3 + 1] = p.y * h; f[(42 + j) * 3 + 2] = p.z * w; });
   const vis = (k) => pl ? (pl[POSE_IDX[k - 42]].visibility ?? 1) : 0;
   const pt = (k) => (isNaN(f[k * 3]) || vis(k) < 0.3) ? null : [f[k * 3], f[k * 3 + 1]];
@@ -522,7 +556,13 @@ async function extract(file, canvas, bar, status) {
 
 const HAND_LINKS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 const POSE_LINKS = [[1,2],[1,3],[3,5],[2,4],[4,6]];
-function drawSkeleton(ctx, canvas, video, f, w, h) {
+const FACE_LINES = [                                    // как в программе: губы, брови, глаза, контур лица
+  [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185, 61],
+  [70, 63, 105, 66, 107], [336, 296, 334, 293, 300],
+  [33, 160, 158, 133, 153, 144, 33], [362, 385, 387, 263, 373, 380, 362],
+  [234, 93, 132, 58, 172, 136, 150, 149, 176, 148, 152, 377, 400, 378, 379, 365, 397, 288, 361, 323, 454]];
+let colorsCache = null, fpsT = [], fpsShown = 0;
+function drawSkeleton(ctx, canvas, video, f, w, h, live = false) {
   const W = canvas.width, H = canvas.height, s = Math.min(W / w, H / h), ox = (W - w * s) / 2, oy = (H - h * s) / 2;
   ctx.fillStyle = '#0d1210'; ctx.fillRect(0, 0, W, H);
   ctx.globalAlpha = 0.35; ctx.drawImage(video, ox, oy, w * s, h * s); ctx.globalAlpha = 1;
@@ -530,9 +570,22 @@ function drawSkeleton(ctx, canvas, video, f, w, h) {
   const line = (a, b, c, wd) => { if (isNaN(f[a * 3]) || isNaN(f[b * 3])) return; const [x1, y1] = P(a), [x2, y2] = P(b);
     ctx.strokeStyle = c; ctx.lineWidth = wd; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
   POSE_LINKS.forEach(([a, b]) => line(42 + a, 42 + b, '#cfd8d3', 2));
-  const cs = getComputedStyle(document.documentElement);
-  const cr = cs.getPropertyValue('--hand-r').trim() || '#e0a400', cl = cs.getPropertyValue('--hand-l').trim() || '#a03ad6';
+  if (live && lastFace) {                                 // лицо — только на экране (в запись не попадает)
+    const fp = lastFace.pts, fx = (p) => ox + p.x * lastFace.w * s, fy = (p) => oy + p.y * lastFace.h * s;
+    ctx.strokeStyle = '#4fd1e0'; ctx.lineWidth = 1.6;
+    for (const ln of FACE_LINES) { ctx.beginPath(); ln.forEach((k, i) => { const p = fp[k]; if (!p) return; i ? ctx.lineTo(fx(p), fy(p)) : ctx.moveTo(fx(p), fy(p)); }); ctx.stroke(); }
+    const n = fp[1]; if (n) { ctx.fillStyle = '#4fd1e0'; ctx.beginPath(); ctx.arc(fx(n), fy(n), 2.5, 0, 6.3); ctx.fill(); }
+  }
+  if (!colorsCache) { const cs = getComputedStyle(document.documentElement); colorsCache = [cs.getPropertyValue('--hand-r').trim() || '#e0a400', cs.getPropertyValue('--hand-l').trim() || '#a03ad6']; }
+  const [cr, cl] = colorsCache;
   HAND_LINKS.forEach(([a, b]) => { line(a, b, cr, 2.5); line(21 + a, 21 + b, cl, 2.5); });
+  if (live) {                                             // скорость: кадров в секунду (как «MP 30» в программе)
+    const now = performance.now(); fpsT.push(now); while (fpsT.length && now - fpsT[0] > 1000) fpsT.shift();
+    if (fpsT.length > 2) fpsShown = fpsT.length;
+    ctx.save(); if (canvas.classList.contains('mirror')) { ctx.translate(W, 0); ctx.scale(-1, 1); }
+    ctx.fillStyle = '#9aa8a1'; ctx.font = '600 13px system-ui, sans-serif';
+    ctx.fillText(`${fpsShown} к/с${gpuState === 'ok' ? ' · GPU' : ''}`, 10, H - 10); ctx.restore();
+  }
 }
 
 // ---------- упаковка точек: int16 в base64 (документ базы до 256 КБ)
@@ -585,7 +638,7 @@ async function preview() {
     await nextFrame();
     if (recording || !cam.videoWidth) continue;
     const W = canvas.width, H = canvas.height, w = cam.videoWidth, h = cam.videoHeight, s = Math.min(W / w, H / h);
-    if (hand && pose) { const fr = grab(); drawSkeleton(ctx, canvas, fr, detectFrame(fr, w, h), w, h); continue; }   // руки видны сразу, как в программе
+    if (hand && pose) { const fr = grab(); drawSkeleton(ctx, canvas, fr, detectFrame(fr, w, h, true), w, h, true); continue; }   // руки видны сразу, как в программе
     ctx.fillStyle = '#0d1210'; ctx.fillRect(0, 0, W, H); ctx.drawImage(cam, (W - w * s) / 2, (H - h * s) / 2, w * s, h * s);
   }
 }
@@ -633,9 +686,9 @@ shotBtn.addEventListener('click', async () => {
       const t = (performance.now() - t0) / 1000;
       if (t > LIMIT) break;
       const w = cam.videoWidth, h = cam.videoHeight;
-      const fr = grab(), f = detectFrame(fr, w, h);
+      const fr = grab(), f = detectFrame(fr, w, h, true);
       raw.push(f); times.push(t);
-      drawSkeleton(ctx, canvas, fr, f, w, h);
+      drawSkeleton(ctx, canvas, fr, f, w, h, true);
       bar.style.width = Math.round(100 * t / LIMIT) + '%';
     }
   } finally {

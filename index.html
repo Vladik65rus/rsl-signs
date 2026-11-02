@@ -6,7 +6,7 @@
 <title>Словарь жестов РЖЯ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>
 /* Сбор жестов РЖЯ: видео -> точки рук и тела в браузере -> файл для программы. Без сервера и без VPN. */
 :root {
@@ -144,7 +144,7 @@ select { font: 15px var(--font-body); padding: 7px 10px; border: 1px solid var(-
         <label class="btn ghost file" for="video-in">или выбрать готовое видео…<input type="file" id="video-in" accept="video/*"></label>
       </div>
       <div class="count" id="count" aria-live="polite"></div>
-      <video id="cam" playsinline muted hidden></video>
+      <video id="cam" playsinline muted autoplay style="position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-1"></video>
       <div class="bar"><i id="rec-bar"></i></div>
       <div class="status" id="rec-status">Нажмите «Включить камеру» и разрешите доступ. В первый раз загрузится нейросеть (около 23 МБ).</div>
       <canvas id="rec-canvas" width="480" height="360" aria-label="Скелет рук и тела из видео"></canvas>
@@ -258,7 +258,7 @@ async function sendRecord(r) {
   fd.append('caption', `👤 ${r.person || 'без имени'}\n✋ ${r.word} — ${r.n} кадров`);
   fd.append('document', new Blob([text], { type: 'application/json' }), `zhesty_rzhya_${stampOf(new Date(r.at))}.json`);
   try {
-    const res = await fetch(`https://api.telegram.org/bot${TG.t}/sendDocument`, { method: 'POST', body: fd });
+    const res = await withTimeout(fetch(`https://api.telegram.org/bot${TG.t}/sendDocument`, { method: 'POST', body: fd }), 30000);
     const j = await res.json();
     if (!j.ok) { console.warn(j); return false; }
   } catch (e) { console.warn(e); return false; }
@@ -272,7 +272,7 @@ async function sendRecord(r) {
 async function tgCall(method, params) {
   const body = new URLSearchParams();                    // обычная форма: без предварительного CORS-запроса
   for (const [k, v] of Object.entries(params)) body.append(k, String(v));
-  const res = await fetch(`https://api.telegram.org/bot${TG.t}/${method}`, { method: 'POST', body });
+  const res = await withTimeout(fetch(`https://api.telegram.org/bot${TG.t}/${method}`, { method: 'POST', body }), 15000);
   const j = await res.json(); if (!j.ok) throw new Error(j.description || method); return j.result;
 }
 const BOARD_HEAD = '📊 Кто прислал жесты';
@@ -385,30 +385,54 @@ async function sendUnsent(statusEl) {
 }
 
 // ---------- нейросеть MediaPipe (в браузере)
-async function loadModels() {
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('долго')), ms))]);
+let modelsP = null, mainP = null, MODEL_BINS = null, mainOnly = false;
+function loadModels() {                                   // один общий запуск: второй вызов ждёт тот же
+  if (!modelsP) modelsP = loadModelsOnce().catch(e => { modelsP = null; $('st-model').textContent = 'Нейросеть: ошибка'; throw e; });
+  return modelsP;
+}
+async function loadMainModels() {                         // нейросеть на самой странице — для «выбрать готовое видео»
+  await loadModels();
   if (hand) return;
-  $('st-model').textContent = 'Нейросеть: загружаю…';
-  const { FilesetResolver, HandLandmarker, PoseLandmarker, FaceLandmarker } = await import('./vision_bundle.mjs');
-  const fs = await FilesetResolver.forVisionTasks(new URL('./wasm', document.baseURI).href);
-  const buf = async (f) => new Uint8Array(await (await fetch(new URL(f, document.baseURI))).arrayBuffer());
-  const hb = await buf('./hand_landmarker.bin'), pb = await buf('./pose_landmarker_lite.bin');
-  const make = async (delegate) => {
-    const h_ = await HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetBuffer: hb, delegate },
-      runningMode: 'VIDEO', numHands: 2, minHandDetectionConfidence: 0.5, minHandPresenceConfidence: 0.5, minTrackingConfidence: 0.5 });
-    const p_ = await PoseLandmarker.createFromOptions(fs, { baseOptions: { modelAssetBuffer: pb, delegate }, runningMode: 'VIDEO', numPoses: 1 });
-    return [h_, p_];
+  if (!mainP) { mainOnly = true; modelsP = null; mainP = loadModels(); }
+  await mainP;
+}
+async function loadModelsOnce() {
+  if (hand) return;
+  const st = $('st-model');
+  st.textContent = 'Нейросеть: загружаю…';
+  let got = 0;
+  const buf = async (f) => {                              // файл модели; показываем, сколько уже скачано
+    const res = await fetch(new URL(f, document.baseURI));
+    if (!res.ok) throw new Error(`${f}: ${res.status}`);
+    const b = new Uint8Array(await res.arrayBuffer());
+    got += b.length; st.textContent = `Нейросеть: загружаю… ${Math.round(got / 1048576)} МБ`;
+    return b;
   };
-  [hand, pose] = await make('CPU');                       // процессор: надёжно везде (видеокарта на части компьютеров теряет руки)
-  try {                                                   // лицо: брови, глаза, губы, нос — только для экрана, НЕ сохраняется
-    face = await FaceLandmarker.createFromOptions(fs, { baseOptions: { modelAssetBuffer: await buf('./face_landmarker.bin'), delegate: 'CPU' },
-      runningMode: 'VIDEO', numFaces: 1 });
-  } catch (e) { console.warn('лицо', e); }
-  try {                                                   // видеокарта для рук: проверяется на живых кадрах против процессора
-    handGPU = await HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetBuffer: hb, delegate: 'GPU' },
-      runningMode: 'VIDEO', numHands: 2, minHandDetectionConfidence: 0.5, minHandPresenceConfidence: 0.5, minTrackingConfidence: 0.5 });
-    gpuState = 'testing';
-  } catch (e) { gpuState = 'off'; console.warn('GPU нет', e); }
-  $('st-model').textContent = 'Нейросеть: готова';
+  const faceBin = buf('./face_landmarker.bin').catch(e => null);   // всё качается сразу, параллельно
+  const [{ FilesetResolver, HandLandmarker, PoseLandmarker, FaceLandmarker }, hb, pb] =
+    await Promise.all([import('./vision_bundle.mjs'), buf('./hand_landmarker.bin'), buf('./pose_landmarker_lite.bin')]);
+  if (typeof Worker !== 'undefined' && !window.RSL_NO_WORKERS && !mainOnly) {
+    st.textContent = 'Нейросеть: запускаю…';
+    try { await startWorkers(hb, pb, await faceBin); st.textContent = 'Нейросеть: готова'; MODEL_BINS = { hb, pb }; return; }
+    catch (e) { console.warn('фоновые потоки не работают — считаю на странице', e); LIVE.ok = false;
+      try { LIVE.wH.forEach(w => w.terminate()); LIVE.wB?.terminate(); } catch (e2) {} }
+  }
+  const fs = await FilesetResolver.forVisionTasks(new URL('./wasm', document.baseURI).href);
+  st.textContent = 'Нейросеть: запускаю…';
+  const hOpt = { runningMode: 'VIDEO', numHands: 2, minHandDetectionConfidence: 0.5, minHandPresenceConfidence: 0.5, minTrackingConfidence: 0.5 };
+  [hand, pose] = await Promise.all([                      // процессор: надёжно везде (видеокарта на части компьютеров теряет руки)
+    HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetBuffer: hb, delegate: 'CPU' }, ...hOpt }),
+    PoseLandmarker.createFromOptions(fs, { baseOptions: { modelAssetBuffer: pb, delegate: 'CPU' }, runningMode: 'VIDEO', numPoses: 1 })]);
+  st.textContent = 'Нейросеть: готова';
+  (async () => {                                          // в фоне, ничего не ждёт: лицо (только для экрана) и видеокарта
+    try { const fb = await faceBin; if (fb) face = await FaceLandmarker.createFromOptions(fs, { baseOptions: { modelAssetBuffer: fb, delegate: 'CPU' },
+      runningMode: 'VIDEO', numFaces: 1 }); } catch (e) { console.warn('лицо', e); }
+    try {                                                 // видеокарта для рук: проверяется на живых кадрах против процессора
+      handGPU = await withTimeout(HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetBuffer: hb, delegate: 'GPU' }, ...hOpt }), 4000);
+      gpuState = 'testing';
+    } catch (e) { gpuState = 'off'; console.warn('GPU нет', e); }
+  })();
 }
 // ---------- руки по сторонам — как HandTracker в программе rsl.py:
 // правая всегда жёлтая, левая всегда фиолетовая, без перескоков цвета; сбои MediaPipe (вторая копия руки,
@@ -500,23 +524,99 @@ function handsOf(video) {
   }
   return hr;
 }
-function detectFrame(video, w, h, live = false) {
-  tsBase += 34; frameN++;
-  const hr = handsOf(video);
-  // тело и лицо меняются медленно: вживую — тело каждый 2-й кадр, лицо каждый 3-й (так телефон держит до 30 к/с)
-  let pl = lastPose;
-  if (!live || frameN % 2 === 0 || !lastPose) { const pr = pose.detectForVideo(video, tsBase); pl = pr.landmarks?.[0] || null; lastPose = pl; }
-  if (live && face && frameN % 3 === 0) { try { const fr_ = face.detectForVideo(video, tsBase); lastFace = fr_.faceLandmarks?.[0] ? { pts: fr_.faceLandmarks[0], w, h } : null; } catch (e) {} }
-  if (!live) lastFace = null;
+function assemble(handsN, labels, pl, w, h) {           // руки (0..1) + тело -> кадр точек как в программе
   const f = new Float32Array(NPT * 3).fill(NaN);
   if (pl) POSE_IDX.forEach((pi, j) => { const p = pl[pi]; f[(42 + j) * 3] = p.x * w; f[(42 + j) * 3 + 1] = p.y * h; f[(42 + j) * 3 + 2] = p.z * w; });
   const vis = (k) => pl ? (pl[POSE_IDX[k - 42]].visibility ?? 1) : 0;
   const pt = (k) => (isNaN(f[k * 3]) || vis(k) < 0.3) ? null : [f[k * 3], f[k * 3 + 1]];
-  const hands = (hr.landmarks || []).map(lm => lm.map(p => [p.x * w, p.y * h, p.z * w]));
-  const labels = (hr.landmarks || []).map((_, k) => ((hr.handednesses?.[k]?.[0]?.categoryName || hr.handedness?.[k]?.[0]?.categoryName) === 'Right') ? 0 : 1);
+  const hands = handsN.map(lm => lm.map(p => [p[0] * w, p[1] * h, p[2] * w]));
   const [right, left] = tracker.assign(hands, labels, pt);
   for (const [hd, off] of [[right, 0], [left, 21]]) if (hd) hd.forEach((p, j) => { f[(off + j) * 3] = p[0]; f[(off + j) * 3 + 1] = p[1]; f[(off + j) * 3 + 2] = p[2]; });
   return f;
+}
+function detectFrame(video, w, h, live = false) {
+  tsBase += 34; frameN++;
+  const hr = handsOf(video);
+  // тело и лицо меняются медленно: вживую — тело каждый 2-й кадр, лицо каждый 3-й
+  let pl = lastPose;
+  if (!live || frameN % 2 === 0 || !lastPose) { const pr = pose.detectForVideo(video, tsBase); pl = pr.landmarks?.[0] || null; lastPose = pl; }
+  if (live && face && frameN % 3 === 0) { try { const fr_ = face.detectForVideo(video, tsBase); lastFace = fr_.faceLandmarks?.[0] ? { pts: fr_.faceLandmarks[0], w, h } : null; } catch (e) {} }
+  if (!live) lastFace = null;
+  const handsN = (hr.landmarks || []).map(lm => lm.map(p => [p.x, p.y, p.z]));
+  const labels = (hr.landmarks || []).map((_, k) => ((hr.handednesses?.[k]?.[0]?.categoryName || hr.handedness?.[k]?.[0]?.categoryName) === 'Right') ? 0 : 1);
+  return assemble(handsN, labels, pl, w, h);
+}
+
+// ---------- ЖИВАЯ КАМЕРА БЫСТРО: руки — в одном фоновом потоке, тело+лицо — в другом (одновременно),
+// камера рисуется на частоте экрана (60 к/с), скелет — как только готов. Раньше всё шло по очереди: ~15 к/с.
+window.__LIVE = null;
+const LIVE = window.__LIVE = { ok: false, wH: [], busy: [], wB: null, busyB: false, tsB: 0, nb: 0, f: null, lastTs: 0,
+  pts: [], fps: 0, rec: null, sentAt: -1, bodyAt: 0 };
+// сколько потоков для рук: по ядрам процессора (2 ядра — 1 поток, 4 — 2, 6 и больше — 3).
+// Потоки берут кадры по очереди, поэтому кадров в секунду в 2–3 раза больше, чем у одного.
+const N_HAND = Math.max(1, Math.min(3, Math.floor(((navigator.hardwareConcurrency || 2) - 1) / 1.5)));
+function startWorkers(hb, pb, fb) {
+  return new Promise((resolve, reject) => {
+    let ready = 0;
+    const url = new URL('./detect_worker.js', document.baseURI).href;
+    const bundle = new URL('./vision_bundle.mjs', document.baseURI).href, wasm = new URL('./wasm', document.baseURI).href;
+    const timer = setTimeout(() => reject(new Error('потоки не запустились')), 25000);
+    const mk = (kind, bins, idx) => {
+      const w = new Worker(url);
+      w.onerror = (e) => { clearTimeout(timer); reject(new Error(e.message || 'поток')); };
+      w.onmessage = (e) => onWorker(e.data, idx);
+      w.postMessage({ type: 'init', kind, bundle, wasm, bins });
+      return w;
+    };
+    LIVE.onReady = () => { if (++ready === N_HAND + 1) { clearTimeout(timer); LIVE.ok = true; resolve(); } };
+    LIVE.onFail = (m) => { clearTimeout(timer); reject(new Error(m)); };
+    LIVE.wH = []; LIVE.busy = []; LIVE.tsH = [];
+    for (let i = 0; i < N_HAND; i++) { LIVE.wH.push(mk('hand', { hand: hb.slice() }, i)); LIVE.busy.push(false); LIVE.tsH.push(0); }
+    LIVE.wB = mk('body', { pose: pb.slice(), face: fb ? fb.slice() : null }, -1);
+  });
+}
+function onWorker(m, idx) {
+  if (m.type === 'ready') { LIVE.onReady?.(); return; }
+  if (m.type === 'error') {
+    console.warn('поток', m.kind, m.msg);
+    if (!LIVE.ok) { LIVE.onFail?.(m.msg); return; }
+    if (m.kind === 'hand') LIVE.busy[idx] = false; else LIVE.busyB = false;
+    return;
+  }
+  const w = cam.videoWidth || 640, h = cam.videoHeight || 480;
+  if (m.kind === 'body') {
+    LIVE.busyB = false; LIVE.dtB = 0.9 * (LIVE.dtB || m.dt) + 0.1 * m.dt;
+    LIVE.pose = m.pose ? m.pose.map(p => ({ x: p[0], y: p[1], z: p[2], visibility: p[3] })) : null;
+    if ('face' in m) lastFace = m.face ? { pts: m.face.map(p => ({ x: p[0], y: p[1] })), w, h } : null;
+    return;
+  }
+  LIVE.busy[idx] = false; LIVE.dtH = 0.9 * (LIVE.dtH || m.dt) + 0.1 * m.dt;
+  if (m.ts <= LIVE.lastTs) return;                        // опоздавший кадр (другой поток уже дал новее)
+  LIVE.lastTs = m.ts;
+  const f = assemble(m.hands, m.labels, LIVE.pose, w, h);
+  LIVE.f = f;
+  const now = performance.now(); LIVE.pts.push(now); while (LIVE.pts.length && now - LIVE.pts[0] > 1000) LIVE.pts.shift();
+  LIVE.fps = LIVE.pts.length;
+  if (LIVE.rec) LIVE.rec(f, m.ts);
+}
+// картинка для нейросети: не больше 480 точек по ширине (модели всё равно смотрят 192–256 точек)
+const LIVE_W = () => +(window.RSL_LIVE_W || 480);
+const LIVE_SIZE = () => { const w = cam.videoWidth, h = cam.videoHeight, W = LIVE_W();
+  return w > W ? { resizeWidth: W, resizeHeight: Math.round(h * W / w), resizeQuality: 'low' } : {}; };
+function pump() {                                         // отдать свежий кадр камеры свободному потоку
+  if (!LIVE.ok || !stream || !cam.videoWidth || cam.readyState < 2) return;
+  const now = Math.round(performance.now()), ct = cam.currentTime;
+  if (ct !== LIVE.sentAt) {                               // новый кадр камеры — первому свободному потоку рук
+    const i = LIVE.busy.indexOf(false);
+    if (i >= 0) {
+      LIVE.sentAt = ct; LIVE.busy[i] = true; const ts = LIVE.tsH[i] = Math.max(LIVE.tsH[i] + 1, now);
+      createImageBitmap(cam, LIVE_SIZE()).then(b => LIVE.wH[i].postMessage({ type: 'frame', bmp: b, ts }, [b])).catch(() => { LIVE.busy[i] = false; });
+    }
+  }
+  if (!LIVE.busyB && now - LIVE.bodyAt >= 66) {           // тело и лицо — 15 раз в секунду (двигаются медленно)
+    LIVE.busyB = true; LIVE.bodyAt = now; const ts = LIVE.tsB = Math.max(LIVE.tsB + 1, now);
+    createImageBitmap(cam, LIVE_SIZE()).then(b => LIVE.wB.postMessage({ type: 'frame', bmp: b, ts, face: true }, [b])).catch(() => { LIVE.busyB = false; });
+  }
 }
 function trimHands(frames, w, h) {                       // только отрезок с руками (+5 кадров с краёв)
   const has = frames.map(f => !isNaN(f[0]) || !isNaN(f[63]));
@@ -529,7 +629,7 @@ function trimHands(frames, w, h) {                       // только отр�
 const once = (el, ev) => new Promise(r => el.addEventListener(ev, r, { once: true }));
 let tsBase = 0;
 async function extract(file, canvas, bar, status) {
-  await loadModels();
+  await loadMainModels();
   const video = document.createElement('video');
   video.muted = true; video.playsInline = true; video.preload = 'auto';
   video.src = URL.createObjectURL(file);
@@ -584,7 +684,7 @@ function drawSkeleton(ctx, canvas, video, f, w, h, live = false) {
     if (fpsT.length > 2) fpsShown = fpsT.length;
     ctx.save(); if (canvas.classList.contains('mirror')) { ctx.translate(W, 0); ctx.scale(-1, 1); }
     ctx.fillStyle = '#9aa8a1'; ctx.font = '600 13px system-ui, sans-serif';
-    ctx.fillText(`${fpsShown} к/с${gpuState === 'ok' ? ' · GPU' : ''}`, 10, H - 10); ctx.restore();
+    ctx.fillText(LIVE.ok ? `${LIVE.fps} к/с · экран ${fpsShown}` : `${fpsShown} к/с${gpuState === 'ok' ? ' · GPU' : ''}`, 10, H - 10); ctx.restore();
   }
 }
 
@@ -630,11 +730,20 @@ const cam = $('cam'), camBtn = $('cam-btn'), shotBtn = $('shot-btn'), stopBtn = 
 let stream = null, previewOn = false, recording = false, stopReq = false;
 const snap = document.createElement('canvas');           // один и тот же кадр и для нейросети, и для рисунка
 function grab() { const w = cam.videoWidth, h = cam.videoHeight; if (snap.width !== w) snap.width = w; if (snap.height !== h) snap.height = h; snap.getContext('2d').drawImage(cam, 0, 0, w, h); return snap; }
-const nextFrame = () => new Promise(r => cam.requestVideoFrameCallback ? cam.requestVideoFrameCallback(() => r()) : requestAnimationFrame(() => r()));
+// кадр камеры; если браузер не сообщает о кадрах (бывает на телефонах) — не ждать дольше 60 мс
+const nextFrame = () => new Promise(r => { let done = false; const ok = () => { if (!done) { done = true; r(); } };
+  if (cam.requestVideoFrameCallback) cam.requestVideoFrameCallback(ok); else requestAnimationFrame(ok); setTimeout(ok, 60); });
 async function preview() {
   const canvas = $('rec-canvas'), ctx = canvas.getContext('2d');
   previewOn = true;
   while (previewOn && stream) {
+    if (LIVE.ok) {                                         // быстрый путь: экран 60 к/с, точки — из фоновых потоков
+      await new Promise(r => requestAnimationFrame(r));
+      if (!cam.videoWidth) continue;
+      pump();
+      drawSkeleton(ctx, canvas, cam, LIVE.f || EMPTY_F, cam.videoWidth, cam.videoHeight, true);
+      continue;
+    }
     await nextFrame();
     if (recording || !cam.videoWidth) continue;
     const W = canvas.width, H = canvas.height, w = cam.videoWidth, h = cam.videoHeight, s = Math.min(W / w, H / h);
@@ -642,11 +751,12 @@ async function preview() {
     ctx.fillStyle = '#0d1210'; ctx.fillRect(0, 0, W, H); ctx.drawImage(cam, (W - w * s) / 2, (H - h * s) / 2, w * s, h * s);
   }
 }
+const EMPTY_F = new Float32Array(NPT * 3).fill(NaN);
 camBtn.addEventListener('click', async () => {
   if (stream) { stopCamera(); return; }
   if (!navigator.mediaDevices?.getUserMedia) { setStatus($('rec-status'), 'Этот браузер не даёт камеру. Выберите готовое видео.', 'bad'); return; }
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } }, audio: false });
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 } }, audio: false });
   } catch (e) {
     setStatus($('rec-status'), e?.name === 'NotAllowedError' ? 'Доступ к камере запрещён. Нажмите на значок камеры/замка в адресной строке → «Разрешить» и обновите страницу.'
       : 'Камера не включилась (занята другой программой или её нет). Закройте программу перевода/Zoom и попробуйте ещё раз.', 'bad');
@@ -681,7 +791,18 @@ shotBtn.addEventListener('click', async () => {
   const raw = [], times = [], t0 = performance.now(), LIMIT = 6;
   tracker = new HandTracker();
   try {
-    while (!stopReq) {
+    if (LIVE.ok) {                                         // точки из фоновых потоков, экран рисует preview()
+      LIVE.rec = (f, ts) => { const t = (ts - t0) / 1000; if (t >= 0 && t <= LIMIT) { raw.push(f); times.push(t); } };
+      while (!stopReq) {
+        await new Promise(r => setTimeout(r, 50));
+        const t = (performance.now() - t0) / 1000;
+        bar.style.width = Math.round(100 * Math.min(1, t / LIMIT)) + '%';
+        if (t > LIMIT) break;
+      }
+      LIVE.rec = null;
+      const ord = times.map((t, i) => i).sort((x, y) => times[x] - times[y]);
+      const r2 = ord.map(i => raw[i]), t2 = ord.map(i => times[i]); raw.length = 0; times.length = 0; raw.push(...r2); times.push(...t2);
+    } else while (!stopReq) {
       await nextFrame();
       const t = (performance.now() - t0) / 1000;
       if (t > LIMIT) break;
@@ -692,6 +813,7 @@ shotBtn.addEventListener('click', async () => {
       bar.style.width = Math.round(100 * t / LIMIT) + '%';
     }
   } finally {
+    LIVE.rec = null;
     recording = false; stopBtn.hidden = true; shotBtn.disabled = false; shotBtn.classList.remove('rec-on'); $('count').textContent = '';
   }
   const dur = times.length ? times[times.length - 1] : 0, out = [];
@@ -716,7 +838,7 @@ function renderChips(highlight) {
   let list = t === '*' ? WORDS.all : (WORDS.topics[t] || []);
   if (t === '*') list = list.filter(w => myCount(w) < 3).slice(0, 0);   // весь словарь — через поиск и «Подсказать»
   const cur = $('word').value.trim().toLowerCase();
-  for (const w of list.slice(0, 40)) {
+  for (const w of list.slice(0, 60)) {
     const b = document.createElement('button'); b.type = 'button';
     b.textContent = w; b.setAttribute('aria-pressed', String(w.toLowerCase() === cur));
     const n = myCount(w); if (n) { const d = document.createElement('span'); d.className = 'done'; d.textContent = '✓' + n; b.appendChild(d); }
@@ -869,6 +991,7 @@ $('check-in').addEventListener('change', async () => {
 });
 
 loadWords();
+setTimeout(() => loadModels().catch(e => console.warn('нейросеть', e)), 300);
 loadRecords().then(async () => { if (TG && navigator.onLine !== false) { await boardOld().catch(e => console.warn(e)); await sendUnsent(null); } });
 window.addEventListener('online', () => { if (TG) sendUnsent(null); });
 $('admin-btn').addEventListener('click', adminStart);

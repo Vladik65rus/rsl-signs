@@ -127,6 +127,7 @@ select { font: 15px var(--font-body); padding: 7px 10px; border: 1px solid var(-
       <div class="row">
         <div class="field"><label for="word">Слово (перевод жеста)</label><input type="text" id="word" placeholder="начните печатать или выберите ниже" autocomplete="off" list="words-all"><datalist id="words-all"></datalist></div>
         <div class="field"><label for="person">Ваше имя (видит только автор проекта)</label><input type="text" id="person" placeholder="например: Никита" autocomplete="off"></div>
+        <div class="field"><label for="city">Город (необязательно)</label><input type="text" id="city" placeholder="например: Барнаул" autocomplete="off"></div>
       </div>
       <div class="pick">
         <div class="row" style="align-items:center;gap:8px">
@@ -255,7 +256,7 @@ async function sendRecord(r) {
   const text = JSON.stringify({ format: 'rsl-online-1', points: 'RH21,LH21,POSE7(0,11,12,13,14,15,16); int16 px; NaN=-32768', items: [item] });
   const fd = new FormData();
   fd.append('chat_id', TG.c);
-  fd.append('caption', `👤 ${r.person || 'без имени'}\n✋ ${r.word} — ${r.n} кадров`);
+  fd.append('caption', `👤 ${whoOf(r)}\n✋ ${r.word} — ${r.n} кадров`);
   fd.append('document', new Blob([text], { type: 'application/json' }), `zhesty_rzhya_${stampOf(new Date(r.at))}.json`);
   try {
     const res = await withTimeout(fetch(`https://api.telegram.org/bot${TG.t}/sendDocument`, { method: 'POST', body: fd }), 30000);
@@ -320,7 +321,7 @@ async function mutateBoard(fn) {
 }
 const clean = (x) => String(x || '').replace(/[\n—•,×]/g, ' ').replace(/\s+/g, ' ').trim();
 function addToBoard(st, r) {
-  const name = clean(r.person) || 'без имени', word = clean(r.word).toLowerCase();
+  const name = whoOf(r), word = clean(r.word).toLowerCase();
   const ws = st.people.get(name) || new Map(); ws.set(word, (ws.get(word) || 0) + 1); st.people.set(name, ws);
 }
 async function updateBoard(r) { await mutateBoard(st => addToBoard(st, r)); }
@@ -334,9 +335,24 @@ function deviceName() { const u = navigator.userAgent; return /iPhone|iPad/.test
 async function noteVisit() {                              // кто зашёл: имя (если вводил раньше) и время — видит только автор
   if (!TG || isAdmin()) return;
   try { if (sessionStorage.getItem('rsl-visit')) return; sessionStorage.setItem('rsl-visit', '1'); } catch (e) {}
-  let name = ''; try { name = localStorage.getItem('rsl-person') || ''; } catch (e) {}
-  await mutateBoard(st => { st.visitsTotal++; st.visits.unshift(`${clean(name) || 'гость'} (${deviceName()}) — ${nowStr()}`); st.visits = st.visits.slice(0, 15); });
+  let name = '', city = '', pid = ''; try { name = localStorage.getItem('rsl-person') || ''; city = localStorage.getItem('rsl-city') || ''; pid = localStorage.getItem('rsl-pid') || ''; } catch (e) {}
+  const who_ = name ? whoOf({ person: name, city, pid }) : 'гость';
+  await mutateBoard(st => { st.visitsTotal++; st.visits.unshift(`${who_} (${deviceName()}) — ${nowStr()}`); st.visits = st.visits.slice(0, 15); });
 }
+
+// ---------- кто снимал: у каждого браузера свой постоянный номер (#k3f2) — два «Сергея» не сольются в одного
+function personId() {
+  let id = '';
+  try { id = localStorage.getItem('rsl-pid') || ''; } catch (e) {}
+  if (!/^[a-z0-9]{4}$/.test(id)) {
+    const a = new Uint8Array(4); (crypto.getRandomValues ? crypto.getRandomValues(a) : a.forEach((_, i) => a[i] = Math.random() * 256));
+    id = [...a].map(b => '0123456789abcdefghijklmnopqrstuvwxyz'[b % 36]).join('');
+    try { localStorage.setItem('rsl-pid', id); } catch (e) {}
+  }
+  return id;
+}
+const whoOf = (r) => { const n = clean(r.person) || 'без имени', c = clean(r.city);
+  return n + (c ? ' · ' + c : '') + (r.pid ? ' #' + r.pid : ''); };
 
 // ---------- вход автора: код приходит ему в Telegram, после этого на этом устройстве видна вкладка «Кто прислал»
 function isAdmin() { try { return localStorage.getItem('rsl-admin') === '1'; } catch (e) { return false; } }
@@ -898,14 +914,14 @@ recBtn.addEventListener('change', async () => {
 againBtn.addEventListener('click', () => { current = null; saveBtn.disabled = true; $('rec-bar').style.width = '0'; setStatus($('rec-status'), 'Выберите следующее видео.'); });
 saveBtn.addEventListener('click', async () => {
   if (!current) return;
-  const word = $('word').value.trim(), person = $('person').value.trim();
+  const word = $('word').value.trim(), person = $('person').value.trim(), city = $('city').value.trim(), pid = personId();
   if (!word || !$('consent').checked) { setStatus($('rec-status'), 'Нужно слово и согласие.', 'warn'); return; }
   if (!person) { setStatus($('rec-status'), 'Напишите ваше имя — автор проекта увидит, от кого запись.', 'warn'); $('person').focus(); return; }
   saveBtn.disabled = true;
   const at = new Date().toISOString();
-  const rec = { id: at + Math.random().toString(36).slice(2, 7), word, person, consent: true, at, w: current.w, h: current.h, fps: FPS, n: current.frames.length, pts: NPT, data: pack(current.frames), sent: false };
+  const rec = { id: at + Math.random().toString(36).slice(2, 7), word, person, city, pid, consent: true, at, w: current.w, h: current.h, fps: FPS, n: current.frames.length, pts: NPT, data: pack(current.frames), sent: false };
   await addRecord(rec);
-  try { localStorage.setItem('rsl-person', person); } catch (e) {}
+  try { localStorage.setItem('rsl-person', person); localStorage.setItem('rsl-city', city); } catch (e) {}
   current = null;
   const same = records.filter(r => r.word.toLowerCase() === word.toLowerCase()).length;
   if (!TG) { setStatus($('rec-status'), `Сохранено: «${word}» (${same}-я запись). Отправка автору не настроена — вкладка «Мои записи» → «Отправить файл».`, 'warn'); return; }
@@ -916,7 +932,8 @@ saveBtn.addEventListener('click', async () => {
   setStatus($('rec-status'), ok ? `✓ «${word}» отправлено автору (${same}-я запись этого слова). Покажите ещё раз — или «Подсказать слово» для следующего.`
     : `«${word}» сохранено, но не отправилось (нет интернета?). Позже: вкладка «Мои записи» → «Отправить неотправленные».`, ok ? 'ok' : 'warn');
 });
-try { const p = localStorage.getItem('rsl-person'); if (p) $('person').value = p; } catch (e) {}
+try { const p = localStorage.getItem('rsl-person'); if (p) $('person').value = p;
+      const c = localStorage.getItem('rsl-city'); if (c) $('city').value = c; } catch (e) {}
 
 // ---------- список и отправка файла
 function renderList() {

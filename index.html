@@ -2,6 +2,8 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
+<meta name="author" content="Савченко Владислав Эдуардович">
+<meta name="copyright" content="© 2026 Савченко В.Э. Все права защищены">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Словарь жестов РЖЯ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -180,7 +182,7 @@ select { font: 15px var(--font-body); padding: 7px 10px; border: 1px solid var(-
 
   <section id="view-check" hidden>
     <div class="card">
-      <p class="note">Черновая проверка: видео с одним жестом сравнивается с вашими записями на этой странице. Настоящий перевод делает программа на компьютере — у неё нейросеть, обученная на 1000 жестах.</p>
+      <p class="note">Проверка: видео с одним жестом сравнивается со словарём автора проекта (его записи жестов) и с вашими записями на этой странице. Это быстрая проверка по движению рук; настоящий перевод делает программа на компьютере с нейросетью.</p>
       <div class="row"><label class="btn file" for="check-in">Видео для проверки<input type="file" id="check-in" accept="video/*" capture="user"></label></div>
       <div class="bar"><i id="check-bar"></i></div>
       <div class="status" id="check-status"></div>
@@ -194,6 +196,10 @@ select { font: 15px var(--font-body); padding: 7px 10px; border: 1px solid var(-
     <span id="admin-code-row" hidden> <input type="text" id="admin-code" inputmode="numeric" placeholder="код" style="width:90px;font:16px var(--font-body);padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)"> <button class="btn" id="admin-ok" style="font-size:13px;padding:6px 10px">Войти</button></span>
     <span class="status" id="admin-status"></span>
     <div style="margin-top:6px">Автор проекта видит, кто прислал записи и кто заходил на страницу (имя — если вы его вводили, и время).</div>
+  </footer>
+  <footer class="note" id="copyright" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line);font-size:12px">
+    © 2026 Савченко Владислав Эдуардович (НГТУ). Все права защищены. Копирование кода, словаря жестов и других материалов сайта без письменного разрешения автора запрещено.
+    Нейросети MediaPipe — Google, лицензия Apache 2.0.
   </footer>
 </div>
 
@@ -979,7 +985,23 @@ $('clear-btn').addEventListener('click', async () => {
   await clearRecords(); renderList();
 });
 
-// ---------- черновая проверка по своим записям
+// ---------- проверка: словарь автора (slovar.json, его записи с ПК) + записи в этом браузере
+let siteDict = null;
+async function loadSiteDict() {
+  if (siteDict) return siteDict;
+  try {
+    const res = await fetch(new URL('./slovar.json', document.baseURI), { cache: 'no-cache' });
+    if (!res.ok) throw new Error(res.status);
+    const d = await res.json(), lib = [];
+    for (const [wi, sc, b64] of d.items) {
+      const bin = atob(b64), f = new Float32Array(bin.length);
+      for (let i = 0; i < bin.length; i++) { let q = bin.charCodeAt(i); if (q > 127) q -= 256; f[i] = q * sc / 127; }
+      lib.push({ word: d.words[wi], f, src: 'автор' });
+    }
+    siteDict = { lib, words: d.words.length, made: d.made };
+  } catch (e) { siteDict = { lib: [], words: 0, made: '' }; }
+  return siteDict;
+}
 $('check-in').addEventListener('change', async () => {
   const file = $('check-in').files[0]; $('check-in').value = '';
   if (!file) return;
@@ -988,8 +1010,9 @@ $('check-in').addEventListener('change', async () => {
     const r = await extract(file, $('check-canvas'), $('check-bar'), $('check-status'));
     const q = r.frames.length ? features(r.frames) : null;
     if (!q) { setStatus($('check-status'), 'Руки или плечи не найдены — снимите при хорошем свете.', 'bad'); return; }
-    const lib = []; for (const x of records) { try { const f = features(unpack(x.data, x.n)); if (f) lib.push({ word: x.word, f }); } catch (e) {} }
-    if (!lib.length) { setStatus($('check-status'), 'Сначала запишите несколько слов.', 'warn'); return; }
+    const dict = await loadSiteDict();
+    const lib = [...dict.lib]; for (const x of records) { try { const f = features(unpack(x.data, x.n)); if (f) lib.push({ word: x.word, f, src: 'вы' }); } catch (e) {} }
+    if (!lib.length) { setStatus($('check-status'), 'Словарь не загрузился, а своих записей ещё нет — запишите несколько слов.', 'warn'); return; }
     const per = new Map();
     for (const e of lib) { let s = 0; for (let i = 0; i < q.length; i++) s += q[i] * e.f[i];
       const k = e.word.toLowerCase(); (per.get(k) || per.set(k, { word: e.word, s: [] }).get(k)).s.push(s); }
@@ -1003,7 +1026,8 @@ $('check-in').addEventListener('change', async () => {
       const p = document.createElement('span'); p.textContent = pct + '%';
       row.append(name, b, p); res.appendChild(row);
     }
-    setStatus($('check-status'), scored[0].v > 0.85 ? `Похоже на «${scored[0].word}».` : 'Уверенного совпадения нет.', scored[0].v > 0.85 ? 'ok' : 'warn');
+    const base = `Сравнено с ${lib.length} записями (${new Set(lib.map(e => e.word.toLowerCase())).size} слов${dict.words ? `, словарь автора от ${dict.made}` : ''}).`;
+    setStatus($('check-status'), (scored[0].v > 0.85 ? `Похоже на «${scored[0].word}». ` : 'Уверенного совпадения нет. ') + base, scored[0].v > 0.85 ? 'ok' : 'warn');
   } catch (err) { console.error(err); setStatus($('check-status'), 'Не получилось обработать видео: ' + (err?.message || err), 'bad'); }
 });
 
